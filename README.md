@@ -200,6 +200,102 @@ for await (const chunk of stream) process.stdout.write(chunk.choices[0]?.delta?.
 
 Python 等其他语言同理 —— 只要是 OpenAI 兼容客户端,把 `base_url` 指过来即可。
 
+## 作为常驻服务运行
+
+代理要常驻,客户端才能随时用。下面是把它做成开机/登录自启的几种方式。
+
+### Windows:计划任务(推荐,仓库自带脚本)
+
+```powershell
+# 登录时自动启动,隐藏窗口,监听 8788
+pwsh -File scripts/install-service.ps1 -StartNow
+
+# 顺带开启心跳与断流检测
+pwsh -File scripts/install-service.ps1 -HeartbeatSeconds 15 -DetectTruncation -StartNow
+
+# 对外暴露时请加本地令牌
+pwsh -File scripts/install-service.ps1 -BindHost 0.0.0.0 -LocalToken sk-local -StartNow
+
+# PATH 里没有 node(mise/nvm 等)时显式指定
+pwsh -File scripts/install-service.ps1 -NodePath "$env:LOCALAPPDATA\mise\installs\node\24.21.0\node.exe" -StartNow
+```
+
+脚本做的事:
+
+1. 在 `%USERPROFILE%\.workbuddy-proxy` 生成两个包装文件
+   - `service.cmd` —— 真正的启动命令,并把 stdout/stderr 追加到 `proxy.log`
+   - `service.vbs` —— 用 `WScript.Shell.Run(..., 0, ...)` **隐藏窗口**拉起 `service.cmd`
+2. 注册名为 **WorkBuddy Proxy** 的计划任务:
+   - 触发器:当前用户**登录时**
+   - 动作:`wscript.exe <service.vbs>`
+   - 设置:允许电池、不限执行时长、**失败后每分钟重启,最多 3 次**
+   - 身份:当前用户(交互式,**不需要管理员**)
+
+常用操作:
+
+| 操作 | 命令 |
+|---|---|
+| 查看状态 | `Get-ScheduledTask -TaskName 'WorkBuddy Proxy' \| Get-ScheduledTaskInfo` |
+| 手动启动 | `Start-ScheduledTask -TaskName 'WorkBuddy Proxy'` |
+| 手动停止 | `Stop-ScheduledTask -TaskName 'WorkBuddy Proxy'` |
+| 看日志 | `Get-Content "$HOME\.workbuddy-proxy\proxy.log" -Tail 50` |
+| 卸载 | `pwsh -File scripts/uninstall-service.ps1`(加 `-Purge` 连包装文件和日志一起删) |
+
+改端口/参数后重新跑一次安装脚本即可(它会覆盖包装文件和任务)。
+
+**不想用脚本?** 等价的手工做法:
+
+```powershell
+$exe  = (Get-Command node).Source
+$root = 'D:\workspace\workbuddy-proxy'          # 换成你的路径
+$dir  = "$HOME\.workbuddy-proxy"
+New-Item -ItemType Directory -Force $dir | Out-Null
+
+# 1. 启动命令(重定向日志)
+"`"$exe`" `"$root\bin\workbuddy-proxy.js`" serve --port 8788 >> `"$dir\proxy.log`" 2>&1" |
+    Set-Content "$dir\service.cmd" -Encoding OEM
+
+# 2. 注册任务
+$action   = New-ScheduledTaskAction -Execute 'cmd.exe' -Argument "/c `"$dir\service.cmd`""
+$trigger  = New-ScheduledTaskTrigger -AtLogOn
+$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+              -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
+Register-ScheduledTask -TaskName 'WorkBuddy Proxy' -Action $action -Trigger $trigger -Settings $settings -Force
+
+# 3. 启动
+Start-ScheduledTask -TaskName 'WorkBuddy Proxy'
+```
+
+> ⚠️ 上面这种直接跑 `cmd.exe` 的写法会在登录时**弹出一个控制台窗口**。仓库脚本额外用
+> `wscript` + `.vbs` 把窗口隐藏,所以更推荐用脚本。
+>
+> ⚠️ 想改启动参数,**重新运行安装脚本**,不要手改 `service.cmd` —— 下次安装会覆盖它。
+
+### Linux / macOS:systemd user unit
+
+```ini
+# ~/.config/systemd/user/workbuddy-proxy.service
+[Unit]
+Description=WorkBuddy OpenAI-compatible proxy
+After=network-online.target
+
+[Service]
+ExecStart=%h/.local/bin/workbuddy-proxy serve --port 8788
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+```
+
+```bash
+systemctl --user daemon-reload
+systemctl --user enable --now workbuddy-proxy
+loginctl enable-linger "$USER"   # 未登录也保持运行
+```
+
+macOS 也可以直接用 launchd,或把上面换成 `brew services` 管理的包装脚本。
+
 ## 工作原理
 
 所有请求都发往 `copilot.tencent.com`:

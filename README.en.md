@@ -206,6 +206,102 @@ const stream = await client.chat.completions.create({
 for await (const chunk of stream) process.stdout.write(chunk.choices[0]?.delta?.content ?? '');
 ```
 
+## Running as a service
+
+The proxy is only useful when it stays up. Here is how to make it start automatically.
+
+### Windows — Scheduled Task (recommended, script included)
+
+```powershell
+# start at logon, hidden window, listening on 8788
+pwsh -File scripts/install-service.ps1 -StartNow
+
+# with heartbeat and truncation detection
+pwsh -File scripts/install-service.ps1 -HeartbeatSeconds 15 -DetectTruncation -StartNow
+
+# exposing beyond loopback? add a local token
+pwsh -File scripts/install-service.ps1 -BindHost 0.0.0.0 -LocalToken sk-local -StartNow
+
+# node not on PATH (mise/nvm)? point at it explicitly
+pwsh -File scripts/install-service.ps1 -NodePath "$env:LOCALAPPDATA\mise\installs\node\24.21.0\node.exe" -StartNow
+```
+
+What the script does:
+
+1. Writes two wrappers into `%USERPROFILE%\.workbuddy-proxy`
+   - `service.cmd` — the real launch command, appending stdout/stderr to `proxy.log`
+   - `service.vbs` — launches `service.cmd` through `WScript.Shell.Run(..., 0, ...)`, **hidden**
+2. Registers a Scheduled Task named **WorkBuddy Proxy**:
+   - trigger: **at logon** of the current user
+   - action: `wscript.exe <service.vbs>`
+   - settings: on battery allowed, no execution time limit, **restart 3× at a 1-minute interval**
+   - principal: the current user, interactive — **no admin rights needed**
+
+| Operation | Command |
+|---|---|
+| Status | `Get-ScheduledTask -TaskName 'WorkBuddy Proxy' \| Get-ScheduledTaskInfo` |
+| Start | `Start-ScheduledTask -TaskName 'WorkBuddy Proxy'` |
+| Stop | `Stop-ScheduledTask -TaskName 'WorkBuddy Proxy'` |
+| Logs | `Get-Content "$HOME\.workbuddy-proxy\proxy.log" -Tail 50` |
+| Uninstall | `pwsh -File scripts/uninstall-service.ps1` (`-Purge` also removes the wrappers and log) |
+
+Re-run the installer after changing the port or flags — it rewrites both the wrappers and
+the task.
+
+**Prefer to do it by hand?**
+
+```powershell
+$exe  = (Get-Command node).Source
+$root = 'D:\workspace\workbuddy-proxy'          # your checkout
+$dir  = "$HOME\.workbuddy-proxy"
+New-Item -ItemType Directory -Force $dir | Out-Null
+
+# 1. launch command (log redirect)
+"`"$exe`" `"$root\bin\workbuddy-proxy.js`" serve --port 8788 >> `"$dir\proxy.log`" 2>&1" |
+    Set-Content "$dir\service.cmd" -Encoding OEM
+
+# 2. register the task
+$action   = New-ScheduledTaskAction -Execute 'cmd.exe' -Argument "/c `"$dir\service.cmd`""
+$trigger  = New-ScheduledTaskTrigger -AtLogOn
+$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+              -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
+Register-ScheduledTask -TaskName 'WorkBuddy Proxy' -Action $action -Trigger $trigger -Settings $settings -Force
+
+# 3. start it
+Start-ScheduledTask -TaskName 'WorkBuddy Proxy'
+```
+
+> ⚠️ Launching `cmd.exe` directly like this pops a **console window** at logon. The bundled
+> script hides it via `wscript` + `.vbs`, which is why the script is the recommended path.
+>
+> ⚠️ To change launch flags, **re-run the installer** — don't hand-edit `service.cmd`, it gets
+> overwritten.
+
+### Linux / macOS — systemd user unit
+
+```ini
+# ~/.config/systemd/user/workbuddy-proxy.service
+[Unit]
+Description=WorkBuddy OpenAI-compatible proxy
+After=network-online.target
+
+[Service]
+ExecStart=%h/.local/bin/workbuddy-proxy serve --port 8788
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+```
+
+```bash
+systemctl --user daemon-reload
+systemctl --user enable --now workbuddy-proxy
+loginctl enable-linger "$USER"   # keep it running while logged out
+```
+
+macOS can use launchd directly, or a wrapper script managed by `brew services`.
+
 ## How it works
 
 All traffic goes to `copilot.tencent.com`:
