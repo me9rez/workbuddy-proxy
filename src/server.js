@@ -14,10 +14,10 @@
  * 上游只支持流式,所以代理一律以 `stream: true` 请求,并在客户端要非流式时
  * 把 SSE 折回一个完整响应。
  *
- * 流式路径上还有两件保命的事:
- *   - **心跳**:空闲时定期写 SSE 注释行,避免客户端/中间层因长时间无数据而超时断开;
- *   - **断流检测**:上游若中途断线或没给出结束标记,往流里补一个 `{"error": …}` 事件,
- *     而不是让客户端把截断的输出当成正常结束。
+ * 两个可选的安全网,**默认都关闭**,需要显式开启:
+ *   - **心跳**(`serve --heartbeat <秒>`):空闲时定期写 SSE 注释行,避免长时间无数据被超时断开;
+ *   - **断流检测**(`serve --detect-truncation`):上游中途断线、或流结束缺少结束标记时,
+ *     往流里补一个 `{"error": …}` 事件,而不是让客户端把截断的输出当成正常结束。
  */
 
 import http from 'node:http';
@@ -110,11 +110,18 @@ export function startHeartbeat(res, intervalMs) {
 }
 
 /**
- * 把上游的 SSE 流透传给客户端,并处理背压、心跳与中途断线。
+ * 把上游的 SSE 流透传给客户端,并处理背压;可选地加心跳与断流检测。
  *
+ * @param {object} options
+ * @param {number} [options.heartbeatMs]      心跳间隔;<=0(默认)关闭
+ * @param {boolean} [options.detectTruncation] 断流时补发错误事件;默认关闭
  * @returns {Promise<void>}
  */
-export async function pipeUpstreamStream(upstream, res, { heartbeatMs, logger = console } = {}) {
+export async function pipeUpstreamStream(
+  upstream,
+  res,
+  { heartbeatMs = 0, detectTruncation = false, logger = console } = {},
+) {
   res.writeHead(200, {
     'content-type': 'text/event-stream; charset=utf-8',
     'cache-control': 'no-cache',
@@ -132,9 +139,11 @@ export async function pipeUpstreamStream(upstream, res, { heartbeatMs, logger = 
       failure = '上游没有返回响应体';
     } else {
       for await (const chunk of upstream.body) {
-        const text = typeof chunk === 'string' ? chunk : decoder.decode(chunk, { stream: true });
-        // 只保留尾部:跨 chunk 的结束标记检测不需要全文,避免无界增长。
-        tail = (tail + text).slice(-4096);
+        if (detectTruncation) {
+          const text = typeof chunk === 'string' ? chunk : decoder.decode(chunk, { stream: true });
+          // 只保留尾部:跨 chunk 的结束标记检测不需要全文,避免无界增长。
+          tail = (tail + text).slice(-4096);
+        }
         if (!res.write(chunk)) await once(res, 'drain');
         if (res.destroyed) break;
       }
@@ -145,7 +154,9 @@ export async function pipeUpstreamStream(upstream, res, { heartbeatMs, logger = 
     stopHeartbeat();
   }
 
-  if (res.destroyed || res.writableEnded) return;
+  // 默认是纯透传:既不补错误事件,也不改结束方式。
+  if (!detectTruncation || res.destroyed || res.writableEnded) return res.end?.() ?? undefined;
+
   if (failure) {
     logger.error?.(`[proxy] ${failure}`);
     res.write(formatSseError(failure));
@@ -154,7 +165,7 @@ export async function pipeUpstreamStream(upstream, res, { heartbeatMs, logger = 
     logger.error?.(`[proxy] ${message}`);
     res.write(formatSseError(message));
   }
-  res.end();
+  return res.end();
 }
 
 /**
@@ -166,6 +177,7 @@ export function createHandler({
   logger = console,
   allowFallthrough = false,
   heartbeatMs = HEARTBEAT_INTERVAL_MS,
+  detectTruncation = false,
 } = {}) {
   return async function handle(req, res) {
     const url = new URL(req.url, `http://${req.headers.host ?? 'localhost'}`);
@@ -215,7 +227,7 @@ export function createHandler({
       }
 
       if (url.pathname === '/v1/chat/completions' && req.method === 'POST') {
-        return await handleChat(req, res, url, { logger, allowFallthrough, heartbeatMs });
+        return await handleChat(req, res, url, { logger, allowFallthrough, heartbeatMs, detectTruncation });
       }
 
       return sendJson(res, 404, { error: { message: `未知路由:${req.method} ${url.pathname}` } });
@@ -237,7 +249,7 @@ function resolveSession(req, url, { allowFallthrough }) {
   });
 }
 
-async function handleChat(req, res, url, { logger, allowFallthrough, heartbeatMs }) {
+async function handleChat(req, res, url, { logger, allowFallthrough, heartbeatMs, detectTruncation }) {
   const session = await resolveSession(req, url, { allowFallthrough });
   const raw = await readBody(req);
 
@@ -278,18 +290,19 @@ async function handleChat(req, res, url, { logger, allowFallthrough, heartbeatMs
   }
 
   if (wantsStream) {
-    return pipeUpstreamStream(upstream, res, { heartbeatMs, logger });
+    return pipeUpstreamStream(upstream, res, { heartbeatMs, detectTruncation, logger });
   }
 
-  // 非流式:读完整段 SSE 后本地聚合。中途断线时 upstream.text() 会抛错,
-  // 没有结束标记则视为截断 —— 两种都直接报错,不返回残缺的 completion。
+  // 非流式:读完整段 SSE 后本地聚合。上游中途断线时 upstream.text() 会抛错;
+  // 开启 --detect-truncation 时,没有结束标记也视为截断 —— 两种都直接报错,
+  // 不返回残缺的 completion。
   let sseText;
   try {
     sseText = await upstream.text();
   } catch (cause) {
     throw new WorkBuddyError(`读取上游响应失败（${cause?.message ?? cause}）`, { cause });
   }
-  if (!sseLooksComplete(sseText)) {
+  if (detectTruncation && !sseLooksComplete(sseText)) {
     throw new WorkBuddyError('上游流提前结束(未收到结束标记 [DONE])');
   }
   return sendJson(res, 200, aggregateSse(sseText, payload.model));
@@ -303,15 +316,19 @@ export function startServer({
   logger = console,
   allowFallthrough = false,
   heartbeatMs = HEARTBEAT_INTERVAL_MS,
+  detectTruncation = false,
 } = {}) {
-  const server = http.createServer(createHandler({ localToken, logger, allowFallthrough, heartbeatMs }));
+  const server = http.createServer(
+    createHandler({ localToken, logger, allowFallthrough, heartbeatMs, detectTruncation }),
+  );
   server.listen(port, host, () => {
     const shown = host === '0.0.0.0' ? '127.0.0.1' : host;
     logger.log?.(`workbuddy-proxy 已启动:http://${shown}:${port}`);
     logger.log?.(`  OpenAI 兼容地址:http://${shown}:${port}/v1`);
     logger.log?.(`  模型列表:      http://${shown}:${port}/v1/models`);
     logger.log?.(`  账号列表:      http://${shown}:${port}/v1/accounts`);
-    logger.log?.(`  SSE 心跳:      ${heartbeatMs > 0 ? `${heartbeatMs} ms` : '已关闭'}`);
+    logger.log?.(`  SSE 心跳:      ${heartbeatMs > 0 ? `${heartbeatMs} ms` : '已关闭(默认)'}`);
+    logger.log?.(`  断流检测:      ${detectTruncation ? '开启' : '已关闭(默认)'}`);
     if (localToken) logger.log?.('  本地令牌:      必须携带 Authorization: Bearer');
   });
   return server;

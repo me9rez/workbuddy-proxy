@@ -93,11 +93,25 @@ test('pipeUpstreamStream forwards a complete stream verbatim', async () => {
   assert.equal(res.text().includes('"error"'), false);
 });
 
-test('pipeUpstreamStream reports an upstream failure as an SSE error event', async () => {
+test('truncation detection is opt-in: a broken stream passes through by default', async () => {
   const errors = [];
   const res = fakeRes();
   await pipeUpstreamStream(fakeUpstream(['data: {"choices":[]}\n\n'], { fail: true }), res, {
     heartbeatMs: 0,
+    logger: { error: (m) => errors.push(m) },
+  });
+
+  assert.equal(res.text().includes('"error"'), false, 'default behaviour is a pure passthrough');
+  assert.equal(errors.length, 0);
+  assert.equal(res.writableEnded, true);
+});
+
+test('pipeUpstreamStream reports an upstream failure when detection is on', async () => {
+  const errors = [];
+  const res = fakeRes();
+  await pipeUpstreamStream(fakeUpstream(['data: {"choices":[]}\n\n'], { fail: true }), res, {
+    heartbeatMs: 0,
+    detectTruncation: true,
     logger: { error: (m) => errors.push(m) },
   });
 
@@ -107,11 +121,12 @@ test('pipeUpstreamStream reports an upstream failure as an SSE error event', asy
   assert.equal(res.writableEnded, true);
 });
 
-test('pipeUpstreamStream flags a stream that ends without a terminator', async () => {
+test('pipeUpstreamStream flags a stream without a terminator when detection is on', async () => {
   const errors = [];
   const res = fakeRes();
   await pipeUpstreamStream(fakeUpstream(['data: {"choices":[{"delta":{"content":"half"}}]}\n\n']), res, {
     heartbeatMs: 0,
+    detectTruncation: true,
     logger: { error: (m) => errors.push(m) },
   });
 
@@ -119,16 +134,25 @@ test('pipeUpstreamStream flags a stream that ends without a terminator', async (
   assert.equal(errors.length, 1);
 });
 
-test('pipeUpstreamStream reports a missing body', async () => {
-  const res = fakeRes();
-  await pipeUpstreamStream({ body: null }, res, { heartbeatMs: 0, logger: { error() {} } });
-  assert.match(res.text(), /没有返回响应体/);
+test('pipeUpstreamStream reports a missing body only when detection is on', async () => {
+  const quiet = fakeRes();
+  await pipeUpstreamStream({ body: null }, quiet, { heartbeatMs: 0, logger: { error() {} } });
+  assert.equal(quiet.text().includes('"error"'), false);
+
+  const loud = fakeRes();
+  await pipeUpstreamStream({ body: null }, loud, {
+    heartbeatMs: 0,
+    detectTruncation: true,
+    logger: { error() {} },
+  });
+  assert.match(loud.text(), /没有返回响应体/);
 });
 
-test('pipeUpstreamStream detects [DONE] split across chunks', async () => {
+test('pipeUpstreamStream detects [DONE] split across chunks when detection is on', async () => {
   const res = fakeRes();
   await pipeUpstreamStream(fakeUpstream(['data: {"choices":[{"delta":{"content":"hi"}}]}\n\n', 'data: [DO', 'NE]\n\n']), res, {
     heartbeatMs: 0,
+    detectTruncation: true,
     logger: { error() {} },
   });
   assert.equal(res.text().includes('"error"'), false, 'a split [DONE] must still count as complete');

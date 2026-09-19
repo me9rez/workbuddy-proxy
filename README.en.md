@@ -11,9 +11,9 @@ Sign in once through the browser, then point any OpenAI-compatible client at
 - 👥 **Multiple accounts** — sign in as many times as you like; pick one per request
 - 📋 **Live model catalog** — the credential's real model list with context windows
 - 🔁 **Streaming *and* non-streaming** — upstream only streams, the proxy folds it back
-- 💓 **Keep-alive + truncation detection** — idle streams get SSE comment heartbeats, and a
-  dropped upstream connection injects an error event instead of letting the client treat a
-  truncated answer as complete
+- 💓 **Opt-in heartbeat & truncation detection** — keep long streams alive and surface a
+  dropped upstream connection as an error event. **Both are off by default**; enable with
+  `--heartbeat <seconds>` / `--detect-truncation`
 - 🧩 **Zero dependencies** — Node ≥ 22, standard library only
 - 🛡️ **Loopback by default** — optional local bearer token for extra safety
 
@@ -78,22 +78,37 @@ curl http://127.0.0.1:8788/v1/chat/completions \
 | `workbuddy-proxy serve [--port 8788] [--host 127.0.0.1] [--token sk-local] [--account <key>] [--fallback] [--heartbeat <seconds>]` | Run the proxy |
 | `workbuddy-proxy logout [--account <key>] [--all]` | Remove one account, or all of them |
 
-### Streaming behaviour
+### Streaming behaviour (two opt-in switches, **both off by default**)
 
-Because upstream only speaks streaming, the proxy adds two safety nets while forwarding:
+By default the proxy is a **pure passthrough**: whatever upstream writes is forwarded
+as-is, with nothing inserted and the end-of-stream left alone.
 
-- **Heartbeat** — every **15 s** by default it writes an SSE comment (`: keep-alive`).
-  Comments are ignored by clients per the SSE spec, so the connection stays alive without
-  polluting the data. Change it with `--heartbeat <seconds>`, disable with `--heartbeat 0`.
-- **Truncation detection** — if the upstream connection drops, or the stream ends without a
-  terminator (`[DONE]` / a `finish_reason`), the proxy emits an OpenAI-shaped error event:
+Harden it with either switch — **both must be enabled explicitly**:
 
-  ```text
-  data: {"error":{"message":"upstream stream interrupted: socket hang up","type":"upstream_error"}}
-  ```
+**Heartbeat** — `--heartbeat <seconds>`
 
-  Non-streaming requests are checked too: an incomplete SSE body fails the request instead
-  of returning a truncated completion.
+Periodically writes an SSE comment (`: keep-alive`). Comments are ignored by clients per
+the SSE spec, so the payload stays clean, but the connection is no longer judged idle by
+clients or intermediaries. Pick a value below the shortest timeout on your path, e.g.
+`--heartbeat 15`.
+
+**Truncation detection** — `--detect-truncation`
+
+When the upstream connection drops, or the stream ends without a terminator (`[DONE]` / a
+`finish_reason`), the proxy emits an OpenAI-shaped error event:
+
+```text
+data: {"error":{"message":"upstream stream interrupted: socket hang up","type":"upstream_error"}}
+```
+
+Without it a client would treat the truncated answer as complete. Non-streaming requests
+are checked the same way: an incomplete SSE body fails the request instead of returning a
+partial completion.
+
+```bash
+# enable both
+workbuddy-proxy serve --heartbeat 15 --detect-truncation
+```
 
 ## Multiple accounts
 

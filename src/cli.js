@@ -37,15 +37,17 @@ const HELP = `workbuddy-proxy —— 把腾讯 WorkBuddy(CodeBuddy)模型代理�
   workbuddy-proxy models [--refresh] [--account <key>]
   workbuddy-proxy models --hermes             生成 Hermes config.yaml 的 providers 片段
   workbuddy-proxy serve [--port 8788] [--host 127.0.0.1] [--token sk-local]
-                        [--account <key>] [--fallback] [--heartbeat <秒>]
+                        [--account <key>] [--fallback]
+                        [--heartbeat <秒>] [--detect-truncation]
   workbuddy-proxy logout [--account <key>] [--all]
   workbuddy-proxy help
 
 启动参数说明:
-  --account       所有请求的默认账号(单个请求可用
-                  "X-WorkBuddy-Account: <id|名称|序号>" header 或 "?account=" query 覆盖)
-  --fallback      某个账号失败时,按顺序尝试剩余账号
-  --heartbeat     SSE 心跳间隔秒数(默认 ${HEARTBEAT_INTERVAL_MS / 1000};0 表示关闭)
+  --account            所有请求的默认账号(单个请求可用
+                       "X-WorkBuddy-Account: <id|名称|序号>" header 或 "?account=" query 覆盖)
+  --fallback           某个账号失败时,按顺序尝试剩余账号
+  --heartbeat <秒>     开启 SSE 心跳(**默认关闭**),如 --heartbeat 15
+  --detect-truncation  开启断流检测(**默认关闭**)：上游断线或缺少结束标记时补发错误事件
 
 环境变量:
   WORKBUDDY_PROXY_HOME    凭据与缓存目录(默认 ~/.workbuddy-proxy)
@@ -230,6 +232,7 @@ export async function run(argv, io = console) {
         localToken: String(flags.token ?? ''),
         allowFallthrough: flags.fallback === true,
         heartbeatMs,
+        detectTruncation: flags['detect-truncation'] === true,
         logger: io,
       });
       return 0;
