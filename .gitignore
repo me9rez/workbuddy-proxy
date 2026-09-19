@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+
+# Local credentials & state — never commit these
+.workbuddy-proxy/
+*.session.json
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Build / coverage
+dist/
+coverage/
+*.tsbuildinfo

@@ -1,0 +1,50 @@
+{
+  "name": "workbuddy-proxy",
+  "version": "1.0.0",
+  "description": "OpenAI-compatible HTTP proxy for Tencent WorkBuddy (CodeBuddy) models — browser login, live model catalog, streaming and non-streaming chat.",
+  "keywords": [
+    "workbuddy",
+    "codebuddy",
+    "tencent",
+    "openai",
+    "openai-compatible",
+    "proxy",
+    "llm",
+    "llm-proxy",
+    "cli"
+  ],
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "workbuddy-proxy": "bin/workbuddy-proxy.js"
+  },
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "bin",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "start": "node bin/workbuddy-proxy.js serve",
+    "login": "node bin/workbuddy-proxy.js login",
+    "models": "node bin/workbuddy-proxy.js models",
+    "test": "node --test",
+    "check": "node --check bin/workbuddy-proxy.js && node --test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/me9rez/workbuddy-proxy.git"
+  },
+  "bugs": {
+    "url": "https://github.com/me9rez/workbuddy-proxy/issues"
+  },
+  "homepage": "https://github.com/me9rez/workbuddy-proxy#readme"
+}
