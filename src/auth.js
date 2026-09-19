@@ -1,11 +1,14 @@
 /**
- * Browser login: create a state, let the user sign in, poll for tokens and the account.
+ * 浏览器登录:创建 state、让用户在浏览器里登录、轮询令牌与账号信息。
  *
- * Flow (all under PLUGIN_BASE):
+ * 流程(都在 PLUGIN_BASE 下):
  *   POST /auth/state?platform=CLI  → { state, authUrl }
- *   (user completes the login in the browser)
+ *   (用户在浏览器完成登录)
  *   GET  /auth/token?state=…       → { accessToken, refreshToken, expiresIn, … }
- *   GET  /login/account?state=…    → account profile
+ *   GET  /login/account?state=…    → 账号资料
+ *
+ * 用另一个账号再次登录会把它**追加**到存储并设为当前;同一账号(按刷新令牌摘要匹配)
+ * 则是原地刷新,不会产生重复条目。
  */
 
 import {

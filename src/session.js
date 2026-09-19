@@ -1,7 +1,7 @@
 /**
- * Credential store with multi-account support.
+ * 凭据存储,支持多账号。
  *
- * On disk (`STATE_DIR/session.json`):
+ * 磁盘格式(`STATE_DIR/session.json`):
  *
  * ```json
  * {
@@ -13,9 +13,8 @@
  * }
  * ```
  *
- * A legacy single-account file (`{ auth, account }`) is migrated to the store shape on
- * first read, so upgrading loses nothing. Tokens are never written to logs; `whoami`
- * and `accounts` print only the id/label and expiry.
+ * 旧版单账号格式(`{ auth, account }`)在首次读取时自动迁移,升级不丢数据。
+ * 令牌绝不写入日志;`whoami` 与 `accounts` 只输出 id/名称与过期时间。
  */
 
 import fs from 'node:fs';

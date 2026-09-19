@@ -1,10 +1,9 @@
 /**
- * Opening a URL in the user's default browser.
+ * 在用户默认浏览器中打开 URL。
  *
- * On Windows `cmd /c start "" <url>` is actively dangerous for this use case: cmd treats
- * an `&` inside the URL as a command separator, so the authorization link arrives
- * truncated and WorkBuddy renders "登录失败 / 登录链接不完整". `rundll32` receives the URL
- * as a plain argv entry and hands it to ShellExecute untouched.
+ * Windows 上 `cmd /c start "" <url>` 在这里是**有害的**:cmd 会把 URL 里的 `&` 当成
+ * 命令分隔符,授权链接被截断后 WorkBuddy 会渲染 "登录失败 / 登录链接不完整"。
+ * `rundll32` 把 URL 当作普通 argv 交给 ShellExecute,不会被解析。
  */
 
 import { spawn } from 'node:child_process';

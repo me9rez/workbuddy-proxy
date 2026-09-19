@@ -1,19 +1,18 @@
 /**
- * OpenAI-compatible HTTP surface.
+ * OpenAI 兼容的 HTTP 层。
  *
- *   GET  /health              → { ok, activeId, account }
- *   GET  /v1/accounts         → the stored accounts (never their tokens)
- *   GET  /v1/models           → OpenAI model list (+ context_length / capabilities)
- *   POST /v1/chat/completions → chat completion (streaming passthrough or locally
- *                               aggregated non-streaming)
+ *   GET  /health              → { ok, activeId, account, accounts }
+ *   GET  /v1/accounts         → 已保存的账号(不含令牌)
+ *   GET  /v1/models           → OpenAI 模型列表(附 context_length / capabilities)
+ *   POST /v1/chat/completions → 对话补全(流式透传,或本地聚合为非流式)
  *
- * Which account answers a request:
- *   1. `X-WorkBuddy-Account: <id|label|index>` header, or `?account=` query
- *   2. otherwise the store's active account
- * With `--fallback`, a failing account falls through to the remaining ones in order.
+ * 用哪个账号应答:
+ *   1. `X-WorkBuddy-Account: <id|名称|序号>` header,或 `?account=` query
+ *   2. 都没有则用存储中的当前账号
+ * 加 `--fallback` 时,某个账号失败会按顺序尝试其余账号。
  *
- * Upstream only speaks streaming, so the proxy always requests `stream: true` and folds
- * the SSE back into one completion when the client did not ask for a stream.
+ * 上游只支持流式,所以代理一律以 `stream: true` 请求,并在客户端要非流式时
+ * 把 SSE 折回一个完整响应。
  */
 
 import http from 'node:http';
@@ -90,7 +89,7 @@ export function createHandler({ localToken = '', logger = console, allowFallthro
     const url = new URL(req.url, `http://${req.headers.host ?? 'localhost'}`);
     try {
       if (localToken && bearerToken(req.headers.authorization) !== localToken) {
-        return sendJson(res, 401, { error: { message: 'invalid local token', type: 'invalid_request_error' } });
+        return sendJson(res, 401, { error: { message: '本地令牌无效', type: 'invalid_request_error' } });
       }
 
       if (url.pathname === '/health') {
@@ -137,7 +136,7 @@ export function createHandler({ localToken = '', logger = console, allowFallthro
         return await handleChat(req, res, url, { logger, allowFallthrough });
       }
 
-      return sendJson(res, 404, { error: { message: `no route: ${req.method} ${url.pathname}` } });
+      return sendJson(res, 404, { error: { message: `未知路由:${req.method} ${url.pathname}` } });
     } catch (error) {
       const message = error?.message ?? String(error);
       logger.error?.(`[proxy] ${message}`);
@@ -164,7 +163,7 @@ async function handleChat(req, res, url, { logger, allowFallthrough }) {
   try {
     payload = JSON.parse(raw || '{}');
   } catch {
-    return sendJson(res, 400, { error: { message: 'invalid JSON body', type: 'invalid_request_error' } });
+    return sendJson(res, 400, { error: { message: '请求体不是合法的 JSON', type: 'invalid_request_error' } });
   }
 
   const wantsStream = payload.stream === true;

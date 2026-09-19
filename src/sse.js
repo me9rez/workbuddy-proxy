@@ -1,10 +1,9 @@
 /**
- * Server-Sent Events helpers.
+ * Server-Sent Events 处理。
  *
- * WorkBuddy **only** answers streaming chat requests (a non-stream request is rejected
- * with `code 11101`, "Non-stream chat request is currently not supported"), so the proxy
- * always asks upstream for a stream. When a client asks for a non-streaming completion,
- * `aggregateSse` folds the stream back into one `chat.completion` object.
+ * WorkBuddy **只**接受流式对话请求(非流式会被拒,`code 11101`,
+ * "Non-stream chat request is currently not supported"),所以代理总是向上游要流;
+ * 客户端要非流式响应时,用 `aggregateSse` 把流折回一个 `chat.completion`。
  */
 
 /** Iterate the `data:` payloads of an SSE text blob, skipping `[DONE]`. */

@@ -1,10 +1,10 @@
 /**
- * Programmatic API.
+ * 编程接口。
  *
  * ```js
  * import { login, fetchModels, ensureFreshSession, sessionCredential, startServer } from 'workbuddy-proxy';
  *
- * await login();                                  // interactive browser sign-in
+ * await login();                                  // 交互式浏览器登录
  * const session = await ensureFreshSession();
  * const models = await fetchModels(sessionCredential(session));
  * startServer({ port: 8788 });

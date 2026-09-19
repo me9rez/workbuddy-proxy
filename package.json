@@ -1,7 +1,7 @@
 {
   "name": "workbuddy-proxy",
   "version": "1.0.0",
-  "description": "OpenAI-compatible HTTP proxy for Tencent WorkBuddy (CodeBuddy) models — browser login, live model catalog, streaming and non-streaming chat.",
+  "description": "把腾讯 WorkBuddy(CodeBuddy)的模型代理成本地 OpenAI 兼容接口 —— 浏览器登录、多账号、实时模型目录、流式与非流式对话。",
   "keywords": [
     "workbuddy",
     "codebuddy",

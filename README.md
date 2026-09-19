@@ -1,141 +1,135 @@
 # workbuddy-proxy
 
-**English** · [简体中文](./README.zh-CN.md)
+**简体中文** · [English](./README.en.md)
 
-An OpenAI-compatible HTTP proxy for **Tencent WorkBuddy (CodeBuddy)** models.
+把 **腾讯 WorkBuddy(CodeBuddy)** 的模型代理成本地 **OpenAI 兼容** HTTP 接口。
 
-Sign in once through the browser, then point any OpenAI-compatible client at
-`http://127.0.0.1:8788/v1` — Hermes, dsh, the OpenAI SDK, IDE plugins, shell scripts.
+浏览器登录一次,然后把任何 OpenAI 兼容客户端指向 `http://127.0.0.1:8788/v1` ——
+Hermes、dsh、OpenAI SDK、IDE 插件、shell 脚本都能直接用。
 
-- 🔐 **Browser login** — no API key required; tokens are refreshed automatically
-- 👥 **Multiple accounts** — sign in as many times as you like; pick one per request
-- 📋 **Live model catalog** — the credential's real model list with context windows
-- 🔁 **Streaming *and* non-streaming** — upstream only streams, the proxy folds it back
-- 🧩 **Zero dependencies** — Node ≥ 22, standard library only
-- 🛡️ **Loopback by default** — optional local bearer token for extra safety
+- 🔐 **浏览器登录** —— 不需要 API Key,访问令牌自动刷新
+- 👥 **多账号** —— 可以登录多个账号,按请求指定用哪个
+- 📋 **实时模型目录** —— 按凭据返回真实模型列表,含上下文窗口和模态
+- 🔁 **流式 + 非流式** —— 上游只支持流式,代理会在本地把它折回完整响应
+- 🧩 **零依赖** —— Node ≥ 22,只用标准库
+- 🛡️ **默认只监听本机** —— 需要对外时可加本地令牌加固
 
-> **Unofficial.** This is a third-party adapter. It is not affiliated with, endorsed by, or
-> supported by Tencent, WorkBuddy, or CodeBuddy. The upstream API is not a public, stable
-> developer API — paths and headers may change with CodeBuddy releases.
+> **非官方项目。** 这是第三方适配器,与腾讯 / WorkBuddy / CodeBuddy 无隶属、背书或支持关系。
+> 上游接口不是公开、稳定承诺的开发者 API,路径和 Header 可能随 CodeBuddy 版本变化。
 
-## Requirements
+## 环境要求
 
-- Node.js **≥ 22** (uses the built-in `fetch`)
-- A WorkBuddy / CodeBuddy account (China region)
+- Node.js **≥ 22**(用到内置 `fetch` 与 `node:test`)
+- WorkBuddy / CodeBuddy 账号(中国区)
 
-## Install
+## 安装
 
 ```bash
-# straight from GitHub — no clone, no build step (the package has zero dependencies)
-pnpm add -g github:me9rez/workbuddy-proxy   # or: npm i -g github:me9rez/workbuddy-proxy
+# 直接从 GitHub 安装 —— 不用 clone、不用 build(本项目零依赖)
+pnpm add -g github:me9rez/workbuddy-proxy   # 或 npm i -g github:me9rez/workbuddy-proxy
 
-# or run it without installing anything
+# 连装都不用,直接跑
 npx github:me9rez/workbuddy-proxy models
 
-# or from a clone
+# 或者从 clone 的仓库跑
 git clone https://github.com/me9rez/workbuddy-proxy.git
 cd workbuddy-proxy
 node bin/workbuddy-proxy.js --help
 ```
 
-Once published to npm, `npx workbuddy-proxy` works too.
+发布到 npm 之后,`npx workbuddy-proxy` 也能用。
 
-## Quick start
+## 快速开始
 
 ```bash
-# 1. Sign in (opens your browser; the URL is printed as a fallback)
-node bin/workbuddy-proxy.js login
+# 1. 登录(会尝试自动打开浏览器;完整 URL 也会打印出来，可手动粘贴)
+workbuddy-proxy login
 
-# 2. See what your account can use
-node bin/workbuddy-proxy.js models
+# 2. 看看这个账号能用哪些模型
+workbuddy-proxy models
 
-# 3. Serve it
-node bin/workbuddy-proxy.js serve
+# 3. 启动代理
+workbuddy-proxy serve
 # → http://127.0.0.1:8788/v1
 ```
 
-Then, with any OpenAI-compatible client:
+然后随便用:
 
 ```bash
 curl http://127.0.0.1:8788/v1/chat/completions \
   -H 'content-type: application/json' \
-  -d '{"model":"deepseek-v4.1-flash","messages":[{"role":"user","content":"hello"}]}'
+  -d '{"model":"deepseek-v4.1-flash","messages":[{"role":"user","content":"你好"}]}'
 ```
 
-## CLI
+## 命令
 
-| Command | Description |
+| 命令 | 说明 |
 |---|---|
-| `workbuddy-proxy login [--label <name>]` | Browser sign-in; **adds** an account and makes it active |
-| `workbuddy-proxy accounts` | List stored accounts (`*` marks the active one) |
-| `workbuddy-proxy use <id\|label\|index>` | Switch the active account |
-| `workbuddy-proxy whoami [--account <key>]` | Print an account summary (never the tokens) |
-| `workbuddy-proxy models [--refresh] [--account <key>]` | List models with context window / max output / vision / reasoning |
-| `workbuddy-proxy models --hermes` | Print a `providers:` snippet for Hermes `config.yaml` |
-| `workbuddy-proxy serve [--port 8788] [--host 127.0.0.1] [--token sk-local] [--account <key>] [--fallback]` | Run the proxy |
-| `workbuddy-proxy logout [--account <key>] [--all]` | Remove one account, or all of them |
+| `workbuddy-proxy login [--label <名称>]` | 浏览器登录;**新增**一个账号并设为当前 |
+| `workbuddy-proxy accounts` | 列出所有账号(`*` 标记当前账号) |
+| `workbuddy-proxy use <id\|label\|序号>` | 切换当前账号 |
+| `workbuddy-proxy whoami [--account <key>]` | 查看某个账号(**不会打印令牌**) |
+| `workbuddy-proxy models [--refresh] [--account <key>]` | 列出模型(含上下文窗口 / 最大输出 / 图片 / 思考) |
+| `workbuddy-proxy models --hermes` | 生成 Hermes `config.yaml` 的 `providers:` 片段 |
+| `workbuddy-proxy serve [--port 8788] [--host 127.0.0.1] [--token sk-local] [--account <key>] [--fallback]` | 启动代理 |
+| `workbuddy-proxy logout [--account <key>] [--all]` | 删除一个账号,或全部 |
 
-## Multiple accounts
+### 环境变量
+
+| 变量 | 含义 |
+|---|---|
+| `WORKBUDDY_PROXY_HOME` | 凭据与缓存目录(默认 `~/.workbuddy-proxy`) |
+| `DEBUG` | 出错时打印堆栈 |
+
+## 多账号
 
 ```bash
-workbuddy-proxy login                 # account A → stored, now active
-workbuddy-proxy login --label work    # account B → added, now active
-workbuddy-proxy accounts              # list them, * = active
-workbuddy-proxy use work              # switch by label (id or 1-based index also work)
-workbuddy-proxy logout --account 2    # drop the second account
-workbuddy-proxy logout --all          # drop everything
+workbuddy-proxy login                 # 账号 A → 已保存,成为当前账号
+workbuddy-proxy login --label work    # 账号 B → 追加,成为当前账号
+workbuddy-proxy accounts              # 查看列表,* 是当前账号
+workbuddy-proxy use work              # 按名称切换(id、序号也可以)
+workbuddy-proxy logout --account 2    # 删除第 2 个账号
+workbuddy-proxy logout --all          # 全部删除
 ```
 
-Each account is identified by a **digest of its refresh token** (never the token itself),
-so signing in again with the same account refreshes it in place instead of duplicating it.
-Credentials live in `~/.workbuddy-proxy/session.json` with mode `0600`; a legacy
-single-account file is migrated automatically on first read.
+每个账号用**刷新令牌的摘要**作为标识(不是令牌本身),所以用同一个账号再次登录会在原地刷新,
+而不会产生重复条目。凭据存放于 `~/.workbuddy-proxy/session.json`(权限 `0600`);
+旧版单账号格式在第一次读取时**自动迁移**。
 
-**Choosing an account per request** — the `serve` process falls back to the active account,
-but any request can override it:
+**按请求选择账号** —— `serve` 默认用当前账号,任何请求都可以覆盖:
 
 ```bash
-# by header (id, label or 1-based index)
+# 用 header(支持 id、名称、从 1 开始的序号)
 curl http://127.0.0.1:8788/v1/chat/completions \
   -H 'X-WorkBuddy-Account: work' ...
 
-# or by query string
+# 或者用 query
 curl 'http://127.0.0.1:8788/v1/models?account=2'
 ```
 
-Add `--fallback` to `serve` and a failing account falls through to the remaining ones in
-order — useful when one account's quota runs dry.
+给 `serve` 加 `--fallback`,某个账号失败时会按顺序自动尝试其余账号 —— 适合某个账号额度用尽的场景。
 
-> Note: HTTP header values are latin-1 by spec, so a non-ASCII label is transmitted as
-> mojibake. The proxy re-decodes those bytes as UTF-8, so `X-WorkBuddy-Account: 示例账号` works,
-> but IDs and ASCII labels are always the safest choice.
+> 注意:HTTP header 规范是 latin-1,非 ASCII 名称会被误解码。代理会把这类字节重新按 UTF-8
+> 解码,所以 `X-WorkBuddy-Account: 示例账号` 也能用;**但 id 和 ASCII 名称永远是最稳妥的选择**。
 
-### Environment
+## HTTP 接口
 
-| Variable | Meaning |
-|---|---|
-| `WORKBUDDY_PROXY_HOME` | Where credentials and caches live (default `~/.workbuddy-proxy`) |
-| `DEBUG` | Print stack traces on fatal errors |
-
-## HTTP API
-
-| Route | Description |
+| 路由 | 说明 |
 |---|---|
 | `GET /health` | `{ ok, activeId, account, accounts }` |
-| `GET /v1/accounts` | Stored accounts (id, label, active flag, expiry — never tokens) |
-| `GET /v1/models` | OpenAI model list, plus `context_length`, `max_output_tokens` and a `capabilities` object |
-| `GET /v1/models?refresh=1` | Bypass the 10-minute catalog cache |
-| `POST /v1/chat/completions` | Chat completion (SSE passthrough with `"stream": true`, otherwise aggregated locally) |
+| `GET /v1/accounts` | 已保存账号(id、名称、是否当前、过期时间 —— 不含令牌) |
+| `GET /v1/models` | OpenAI 模型列表,附 `context_length`、`max_output_tokens`、`capabilities` |
+| `GET /v1/models?refresh=1` | 绕过 10 分钟目录缓存 |
+| `POST /v1/chat/completions` | 对话补全(`"stream": true` 直接透传 SSE,否则本地聚合) |
 
-Account selection: `X-WorkBuddy-Account: <id|label|index>` header, or `?account=<key>`;
-without either, the store's active account is used.
+账号选择:`X-WorkBuddy-Account: <id|名称|序号>` header,或 `?account=<key>`;都不给则用当前账号。
 
-When `--token` is set, every request must carry `Authorization: Bearer <token>`.
+设置 `--token` 后,所有请求都必须带 `Authorization: Bearer <token>`。
 
-## Use with Hermes
+## 接入 Hermes
 
 ```bash
-node bin/workbuddy-proxy.js models --hermes   # prints the snippet
+workbuddy-proxy models --hermes   # 打印片段
 ```
 
 ```yaml
@@ -153,10 +147,13 @@ providers:
 ```
 
 ```bash
-hermes --provider workbuddy-proxy -m glm-5.3 -z "hello"
+hermes --provider workbuddy-proxy -m glm-5.3 -z "你好"
 ```
 
-## Use with the OpenAI SDK
+> Hermes 的模型选择器只读 `models.dev` 映射表、内置 overlay 和 `config.yaml` 的 `providers:` 段,
+> 所以自定义 provider **必须**写进配置才能在选择器里看到。
+
+## 接入 OpenAI SDK
 
 ```js
 import OpenAI from 'openai';
@@ -165,82 +162,88 @@ const client = new OpenAI({ baseURL: 'http://127.0.0.1:8788/v1', apiKey: 'not-ne
 
 const stream = await client.chat.completions.create({
   model: 'deepseek-v4.1-flash',
-  messages: [{ role: 'user', content: 'hello' }],
+  messages: [{ role: 'user', content: '你好' }],
   stream: true,
 });
 for await (const chunk of stream) process.stdout.write(chunk.choices[0]?.delta?.content ?? '');
 ```
 
-## How it works
+Python 等其他语言同理 —— 只要是 OpenAI 兼容客户端,把 `base_url` 指过来即可。
 
-All traffic goes to `copilot.tencent.com`:
+## 工作原理
 
-| Step | Request |
+所有请求都发往 `copilot.tencent.com`:
+
+| 步骤 | 请求 |
 |---|---|
-| Login state | `POST /v2/plugin/auth/state?platform=CLI` → `{ state, authUrl }` |
-| Login (browser) | `GET /v2/plugin/auth/token?state=…` (polled) → access + refresh tokens |
-| Account | `GET /v2/plugin/login/account?state=…` |
-| Refresh | `POST /v2/plugin/auth/token/refresh` with `X-Refresh-Token` |
-| Catalog | `GET /v3/config` — `Authorization: Bearer` (token) or `X-API-Key` (key) |
-| Inference | `POST /v2/chat/completions` — **SSE only** |
+| 创建登录会话 | `POST /v2/plugin/auth/state?platform=CLI` → `{ state, authUrl }` |
+| 浏览器登录 | 轮询 `GET /v2/plugin/auth/token?state=…` → access + refresh token |
+| 账号信息 | `GET /v2/plugin/login/account?state=…` |
+| 刷新令牌 | `POST /v2/plugin/auth/token/refresh`(Header `X-Refresh-Token`) |
+| 模型目录 | `GET /v3/config` —— 令牌模式用 `Authorization: Bearer`,Key 模式用 `X-API-Key` |
+| 推理 | `POST /v2/chat/completions` —— **只支持流式** |
 
-Two upstream quirks shaped the design:
+设计被上游的两个特性塑造:
 
-1. **Non-streaming chat requests are rejected** (`{"code":11101,"msg":"Non-stream chat request
-   is currently not supported"}`). The proxy always requests a stream and, when the client
-   asked for a non-stream response, reassembles the SSE locally (text, reasoning and
-   fragment-wise tool calls).
-2. **Model lists are scoped to the credential.** `agents[name="cli"].models` differs per
-   account/key, and a model id that another client shows may be rejected server-side. Never
-   hardcode the list — read it from `/v3/config`.
+1. **非流式请求会被拒绝**(`{"code":11101,"msg":"Non-stream chat request is currently not supported"}`)。
+   代理一律用 `stream: true` 请求上游;客户端要非流式时,在本地把 SSE 聚合成一个完整响应
+   (文本、思考、以及分片到达的工具调用)。
+2. **模型列表按凭据返回**。`agents[name="cli"].models` 因账号/Key 而异,别的客户端能看到
+   的模型 id 在你这里可能被服务端拒绝。**不要硬编码模型列表**,从 `/v3/config` 读。
 
-## Security & privacy
+## 安全与隐私
 
-- Credentials live in `~/.workbuddy-proxy/session.json` with mode `0600` and are **never**
-  written to logs; `whoami` prints a summary without tokens.
-- The server binds to **loopback** by default. If you bind beyond it, pass `--token` — the
-  proxy will then require `Authorization: Bearer <token>`.
-- This proxy speaks for *your* account: anything that can reach it can spend your quota.
+- 凭据存放于 `~/.workbuddy-proxy/session.json`,权限 `0600`,**绝不写入日志**;`whoami` 只输出
+  摘要(账号名、id、过期时间),不含令牌。
+- 服务**默认只绑定回环地址**。如果要对局域网开放,请传 `--token`,代理会强制校验
+  `Authorization: Bearer <token>`。
+- 这个代理代表**你的账号**说话:任何能访问它的人都能消耗你的额度。
+- 仓库本身不含任何个人信息 —— 示例与测试数据一律使用中性占位名。
 
-## Troubleshooting
+## 常见问题
 
-| Symptom | Cause / fix |
+| 现象 | 原因 / 处理 |
 |---|---|
-| Browser shows **“登录失败 / 登录链接不完整”** | The auth URL was truncated — usually by a shell that treats `&` specially (`cmd /c start`, older shortcuts). Copy the full URL printed by the CLI and paste it into the browser. The bundled opener uses `rundll32` on Windows for exactly this reason. |
-| `code 11101` from the proxy | Upstream rejected a non-stream request. Update the proxy — it always streams upstream and folds the response locally. |
-| `尚未登录，请先运行…` | Run `workbuddy-proxy login`. |
-| `模型目录 HTTP 401/403` | The credential is invalid or expired; re-run `login`. |
-| Hermes picker does not list the provider | The GUI picker only reads `models.dev` + built-in overlays + the `providers:` dict in `config.yaml`. Declare the provider there (see above). |
+| 浏览器显示 **“登录失败 / 登录链接不完整”** | 授权链接被截断 —— 通常是 shell 把 `&` 当成了特殊字符(`cmd /c start`、旧快捷方式)。复制 CLI 打印的完整 URL 粘贴到浏览器即可。本项目在 Windows 上使用 `rundll32` 正是为了避开这个坑。 |
+| 代理返回 `code 11101` | 上游拒绝了非流式请求。更新代理 —— 它现在一律流式请求上游、本地聚合。 |
+| `尚未登录，请先运行…` | 执行 `workbuddy-proxy login`。 |
+| `找不到账号「xxx」` | 账号 key 写错了。跑 `workbuddy-proxy accounts` 看 id / 名称 / 序号。 |
+| `模型目录 HTTP 401/403` | 凭据无效或过期,重新 `login`。 |
+| Hermes 模型选择器里看不到这个 provider | GUI 选择器只读 `models.dev` + 内置 overlay + `config.yaml` 的 `providers:` 段。把 provider 声明在那里(见上)。 |
+| 装了但命令找不到 | pnpm 全局 bin 目录可能不在 PATH;Windows 上请用 `.cmd`/`.ps1` shim 或 PowerShell,git-bash 下 pnpm 的 bash shim 有已知的 MSYS 路径问题。 |
 
-## Development
+## 开发
 
 ```bash
-node --test          # 22 unit tests
-npm run check        # syntax + tests
+node --test          # 42 个单元测试
+npm run check        # 语法检查 + 测试
 ```
 
-Layout:
+CI 在 Node 22 / 24 上跑同样的检查(`.github/workflows/ci.yml`)。
+
+目录结构:
 
 ```
-bin/workbuddy-proxy.js   executable shim
-src/constants.js         endpoints, headers, paths
-src/api.js               plugin HTTP client + errors
-src/auth.js              browser login flow
-src/session.js           credential storage + token refresh
-src/catalog.js           /v3/config parsing + cache
-src/sse.js               SSE parsing + local aggregation
-src/server.js            OpenAI-compatible HTTP surface
-src/cli.js               command line
-src/index.js             programmatic exports
-test/                    node:test suites
+bin/workbuddy-proxy.js   可执行入口
+src/constants.js         端点、Header、路径
+src/api.js               插件 HTTP 客户端 + 错误类型
+src/auth.js              浏览器登录流程
+src/session.js           凭据存储(多账号)+ 令牌刷新
+src/catalog.js           /v3/config 解析 + 缓存
+src/sse.js               SSE 解析 + 本地聚合
+src/server.js            OpenAI 兼容 HTTP 层
+src/browser.js           跨平台打开浏览器
+src/cli.js               命令行
+src/index.js             编程接口导出
+test/                    node:test 测试
 ```
 
-## Credits
+## 致谢
 
-The upstream endpoints and request shapes were mapped with reference to
-[`@axiaohungry/dsh-llm-workbuddy`](https://github.com/Axiaohungry/dsh-llm-workbuddy) (MIT) and
-its WorkBuddy API notes. This project is an independent implementation.
+上游端点与请求形态的梳理参考了
+[`@axiaohungry/dsh-llm-workbuddy`](https://github.com/Axiaohungry/dsh-llm-workbuddy)(MIT)
+及其 WorkBuddy API 文档。本项目是独立实现。
 
-## License
+## 许可
 
 [MIT](./LICENSE)

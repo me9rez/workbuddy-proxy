@@ -1,10 +1,9 @@
 /**
- * Model catalog.
+ * 模型目录。
  *
- * `GET /v3/config` returns `{ data: { agents: [{name, models[]}], models: [{id, …}] } }`.
- * Only models listed under the `cli` agent are usable, and that list is scoped to the
- * credential — two valid keys can return different ids. Capacity comes from
- * `maxInputTokens ?? maxAllowedSize` and `maxOutputTokens`.
+ * `GET /v3/config` 返回 `{ data: { agents: [{name, models[]}], models: [{id, …}] } }`。
+ * 只有 `cli` agent 下列出的模型可用,而且该列表**按凭据**返回 —— 两把有效的 Key 可能
+ * 得到不同的 id。容量取自 `maxInputTokens ?? maxAllowedSize` 与 `maxOutputTokens`。
  */
 
 import fs from 'node:fs';

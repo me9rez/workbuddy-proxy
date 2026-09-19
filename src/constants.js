@@ -1,8 +1,8 @@
 /**
- * Endpoints, headers and local paths.
+ * 端点、Header 与本地路径。
  *
- * The upstream API is not a public, contractually stable developer API: paths and
- * headers may change with CodeBuddy releases. Everything that could drift lives here.
+ * 上游接口不是公开、稳定承诺的开发者 API:路径与 Header 可能随 CodeBuddy 版本变化。
+ * 所有可能漂移的东西都集中在这里。
  */
 
 import os from 'node:os';

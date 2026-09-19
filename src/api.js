@@ -1,8 +1,8 @@
 /**
- * Thin client for the WorkBuddy plugin endpoints.
+ * WorkBuddy 插件端点的轻量客户端。
  *
- * Every call answers `{code, msg, data}` and must be checked on *both* the HTTP status
- * and the business `code` — HTTP 200 with `code !== 0` is a normal failure shape here.
+ * 每个调用都返回 `{code, msg, data}`,必须**同时**检查 HTTP 状态与业务 `code` ——
+ * 这里 HTTP 200 但 `code !== 0` 是正常的失败形态。
  */
 
 import {

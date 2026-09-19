@@ -1,10 +1,10 @@
 /**
- * Command line interface.
+ * 命令行界面。
  *
- *   workbuddy-proxy login [--label name]           browser login; adds an account
- *   workbuddy-proxy accounts                       list stored accounts
- *   workbuddy-proxy use <id|label|index>           switch the active account
- *   workbuddy-proxy whoami [--account <key>]       print one account's summary
+ *   workbuddy-proxy login [--label 名称]           浏览器登录;新增一个账号
+ *   workbuddy-proxy accounts                       列出已保存账号
+ *   workbuddy-proxy use <id|名称|序号>             切换当前账号
+ *   workbuddy-proxy whoami [--account <key>]       查看某个账号的摘要
  *   workbuddy-proxy models [--refresh] [--account <key>] [--hermes]
  *   workbuddy-proxy serve [--port] [--host] [--token] [--account <key>] [--fallback]
  *   workbuddy-proxy logout [--account <key>] [--all]
@@ -26,30 +26,30 @@ import {
 import { fetchModels, clearCache, sessionCredential } from './catalog.js';
 import { startServer } from './server.js';
 
-const HELP = `workbuddy-proxy — OpenAI-compatible proxy for Tencent WorkBuddy (CodeBuddy) models
+const HELP = `workbuddy-proxy —— 把腾讯 WorkBuddy(CodeBuddy)模型代理成 OpenAI 兼容接口
 
-Usage:
-  workbuddy-proxy login [--label <name>]      Sign in; adds an account and makes it active
-  workbuddy-proxy accounts                    List stored accounts (* marks the active one)
-  workbuddy-proxy use <id|label|index>        Switch the active account
-  workbuddy-proxy whoami [--account <key>]    Print an account summary
+用法:
+  workbuddy-proxy login [--label <名称>]      浏览器登录;新增账号并设为当前
+  workbuddy-proxy accounts                    列出已保存账号(* 标记当前账号)
+  workbuddy-proxy use <id|名称|序号>          切换当前账号
+  workbuddy-proxy whoami [--account <key>]    查看某个账号的摘要
   workbuddy-proxy models [--refresh] [--account <key>]
-  workbuddy-proxy models --hermes             Print a Hermes config.yaml providers snippet
+  workbuddy-proxy models --hermes             生成 Hermes config.yaml 的 providers 片段
   workbuddy-proxy serve [--port 8788] [--host 127.0.0.1] [--token sk-local]
                         [--account <key>] [--fallback]
   workbuddy-proxy logout [--account <key>] [--all]
   workbuddy-proxy help
 
-Serving notes:
-  --account       default account for every request (per-request override:
-                  "X-WorkBuddy-Account: <id|label|index>" header or "?account=" query)
-  --fallback      when an account fails, try the remaining accounts in order
+启动参数说明:
+  --account       所有请求的默认账号(单个请求可用
+                  "X-WorkBuddy-Account: <id|名称|序号>" header 或 "?account=" query 覆盖)
+  --fallback      某个账号失败时,按顺序尝试剩余账号
 
-Environment:
-  WORKBUDDY_PROXY_HOME    Directory for credentials and caches (default: ~/.workbuddy-proxy)
+环境变量:
+  WORKBUDDY_PROXY_HOME    凭据与缓存目录(默认 ~/.workbuddy-proxy)
 `;
 
-/** Parse `--flag value` and positional arguments. */
+/** 解析 `--标志 值` 与位置参数。 */
 export function parseArgs(argv) {
   const out = { _: [], flags: {} };
   for (let i = 0; i < argv.length; i++) {
@@ -70,37 +70,37 @@ export function parseArgs(argv) {
   return out;
 }
 
-/** Human-readable model table. */
+/** 人类可读的模型列表。 */
 export function formatModels(models) {
-  const lines = [`${models.length} model(s):`, ''];
+  const lines = [`共 ${models.length} 个模型:`, ''];
   for (const model of models) {
     lines.push(
       `  ${model.id.padEnd(22)} ${String(model.name).padEnd(20)} ` +
-        `ctx=${String(model.contextWindow).padStart(9)} out=${String(model.maxTokens).padStart(7)}` +
-        `${model.images ? '  vision' : ''}${model.reasoning ? '  reasoning' : ''}`,
+        `上下文=${String(model.contextWindow).padStart(9)} 输出=${String(model.maxTokens).padStart(7)}` +
+        `${model.images ? '  图片' : ''}${model.reasoning ? '  思考' : ''}`,
     );
   }
   return lines.join('\n');
 }
 
-/** Human-readable account table. */
+/** 人类可读的账号列表。 */
 export function formatAccounts(accounts) {
-  if (!accounts.length) return 'No accounts. Run: workbuddy-proxy login';
-  const lines = [`${accounts.length} account(s):`, ''];
+  if (!accounts.length) return '还没有账号。请先运行:workbuddy-proxy login';
+  const lines = [`共 ${accounts.length} 个账号:`, ''];
   accounts.forEach((account, index) => {
     lines.push(
       `  ${account.active ? '*' : ' '} ${String(index + 1).padStart(2)}  ` +
         `${account.id}  ${String(account.label ?? '').padEnd(16)}  ` +
-        `expires ${account.expiresAt ?? 'unknown'}`,
+        `过期时间 ${account.expiresAt ?? '未知'}`,
     );
   });
   return lines.join('\n');
 }
 
-/** Hermes `providers:` snippet built from the live catalog. */
+/** 根据实时模型目录生成 Hermes `providers:` 片段。 */
 export function formatHermesSnippet(models, { name = 'workbuddy-proxy', baseUrl = 'http://127.0.0.1:8788/v1' } = {}) {
   const lines = [
-    '# Paste under `providers:` in Hermes config.yaml',
+    '# 粘贴到 Hermes config.yaml 的 providers: 段下',
     "#   hermes config set providers.workbuddy-proxy '<json>' --force",
     '',
     `  ${name}:`,
@@ -118,7 +118,7 @@ export function formatHermesSnippet(models, { name = 'workbuddy-proxy', baseUrl 
   return lines.join('\n');
 }
 
-/** Run the CLI. @returns {Promise<number>} exit code */
+/** 运行 CLI。@returns {Promise<number>} 退出码 */
 export async function run(argv, io = console) {
   const { _: positional, flags } = parseArgs(argv);
   const command = positional[0] ?? 'help';
@@ -127,8 +127,8 @@ export async function run(argv, io = console) {
     case 'login': {
       const session = await login({
         onAuthUrl: (url, opened) => {
-          io.log('\nComplete the sign-in in your browser:');
-          if (!opened) io.log('  (could not open a browser automatically — paste this URL)');
+          io.log('\n请在浏览器中完成登录:');
+          if (!opened) io.log('  (未能自动打开浏览器 —— 请手动复制下面的链接)');
           io.log(`\n  ${url}\n`);
         },
       });
@@ -140,8 +140,8 @@ export async function run(argv, io = console) {
           saveStore(store);
         }
       }
-      io.log(`✅ Logged in as ${accountLabel(session.account) ?? 'unknown'} (id ${session.id})`);
-      io.log('   This account is now active. Run "workbuddy-proxy accounts" to see them all.');
+      io.log(`✅ 已登录:${accountLabel(session.account) ?? '未知账号'}(id ${session.id})`);
+      io.log('   该账号现在是当前账号。运行 "workbuddy-proxy accounts" 查看全部。');
       return 0;
     }
 
@@ -153,17 +153,17 @@ export async function run(argv, io = console) {
     case 'use': {
       const key = positional[1];
       if (!key) {
-        io.error('Usage: workbuddy-proxy use <id|label|index>');
+        io.error('用法:workbuddy-proxy use <id|名称|序号>');
         return 1;
       }
       const store = loadStore();
       const target = setActiveSession(store, key);
       if (!target) {
-        io.error(`No account matches "${key}". Run: workbuddy-proxy accounts`);
+        io.error(`找不到账号「${key}」。运行 workbuddy-proxy accounts 查看。`);
         return 1;
       }
       saveStore(store);
-      io.log(`Active account: ${target.label} (${target.id})`);
+      io.log(`当前账号已切换为:${target.label}(${target.id})`);
       return 0;
     }
 
@@ -172,7 +172,7 @@ export async function run(argv, io = console) {
       const session = findSession(store, flags.account);
       const summary = sessionSummary(session);
       if (!summary) {
-        io.log('Not logged in.');
+        io.log('尚未登录。');
         return 1;
       }
       io.log(JSON.stringify({ ...summary, active: session.id === store.activeId }, null, 2));
@@ -185,18 +185,18 @@ export async function run(argv, io = console) {
         const count = store.sessions.length;
         clearStore();
         clearCache();
-        io.log(count ? `Removed ${count} account(s).` : 'Nothing to remove.');
+        io.log(count ? `已删除 ${count} 个账号。` : '没有可删除的账号。');
         return 0;
       }
       const removed = removeSession(store, flags.account);
       if (!removed) {
-        io.log('Nothing to remove.');
+        io.log('没有可删除的账号。');
         return 0;
       }
       saveStore(store);
       clearCache();
-      io.log(`Removed account ${removed.label} (${removed.id}).`);
-      if (store.activeId) io.log(`Active account is now ${store.activeId}.`);
+      io.log(`已删除账号:${removed.label}(${removed.id})。`);
+      if (store.activeId) io.log(`当前账号已切换为 ${store.activeId}。`);
       return 0;
     }
 
@@ -210,7 +210,7 @@ export async function run(argv, io = console) {
     case 'serve': {
       const port = Number(flags.port ?? DEFAULT_PORT);
       if (!Number.isInteger(port) || port <= 0 || port > 65535) {
-        io.error(`Invalid --port: ${flags.port}`);
+        io.error(`--port 无效:${flags.port}`);
         return 1;
       }
       startServer({
