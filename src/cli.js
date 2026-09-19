@@ -25,6 +25,7 @@ import {
 } from './session.js';
 import { fetchModels, clearCache, sessionCredential } from './catalog.js';
 import { startServer } from './server.js';
+import { HEARTBEAT_INTERVAL_MS } from './constants.js';
 
 const HELP = `workbuddy-proxy —— 把腾讯 WorkBuddy(CodeBuddy)模型代理成 OpenAI 兼容接口
 
@@ -36,7 +37,7 @@ const HELP = `workbuddy-proxy —— 把腾讯 WorkBuddy(CodeBuddy)模型代理�
   workbuddy-proxy models [--refresh] [--account <key>]
   workbuddy-proxy models --hermes             生成 Hermes config.yaml 的 providers 片段
   workbuddy-proxy serve [--port 8788] [--host 127.0.0.1] [--token sk-local]
-                        [--account <key>] [--fallback]
+                        [--account <key>] [--fallback] [--heartbeat <秒>]
   workbuddy-proxy logout [--account <key>] [--all]
   workbuddy-proxy help
 
@@ -44,6 +45,7 @@ const HELP = `workbuddy-proxy —— 把腾讯 WorkBuddy(CodeBuddy)模型代理�
   --account       所有请求的默认账号(单个请求可用
                   "X-WorkBuddy-Account: <id|名称|序号>" header 或 "?account=" query 覆盖)
   --fallback      某个账号失败时,按顺序尝试剩余账号
+  --heartbeat     SSE 心跳间隔秒数(默认 ${HEARTBEAT_INTERVAL_MS / 1000};0 表示关闭)
 
 环境变量:
   WORKBUDDY_PROXY_HOME    凭据与缓存目录(默认 ~/.workbuddy-proxy)
@@ -213,11 +215,21 @@ export async function run(argv, io = console) {
         io.error(`--port 无效:${flags.port}`);
         return 1;
       }
+      let heartbeatMs = HEARTBEAT_INTERVAL_MS;
+      if (flags.heartbeat !== undefined) {
+        const seconds = Number(flags.heartbeat);
+        if (!Number.isFinite(seconds) || seconds < 0) {
+          io.error(`--heartbeat 无效:${flags.heartbeat}(应为秒数,0 表示关闭)`);
+          return 1;
+        }
+        heartbeatMs = Math.round(seconds * 1000);
+      }
       startServer({
         port,
         host: String(flags.host ?? DEFAULT_HOST),
         localToken: String(flags.token ?? ''),
         allowFallthrough: flags.fallback === true,
+        heartbeatMs,
         logger: io,
       });
       return 0;

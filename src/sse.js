@@ -22,15 +22,45 @@ export function* iterSseData(sseText) {
   }
 }
 
+/** SSE 注释行 —— 按规范,客户端会忽略以 `:` 开头的行,因而适合做心跳保活。 */
+export const SSE_HEARTBEAT = ': keep-alive\n\n';
+
+/** 上游流的结束标记。 */
+export const SSE_DONE = '[DONE]';
+
 /**
- * Fold an SSE stream into a single OpenAI-shaped `chat.completion`.
+ * 判断一段 SSE 文本里是否出现了结束标记。
+ * 容忍 `data:[DONE]` / `data: [DONE]` 两种写法与前后空白。
+ */
+export function sseHasDone(text) {
+  return /(?:^|\n)\s*data:\s*\[DONE\]/.test(String(text));
+}
+
+/**
+ * 这段 SSE 是否看起来是**完整**的:出现 `[DONE]`,或至少出现过一次结束原因。
+ * 用于把「上游中途断线」和「正常结束」区分开。
+ */
+export function sseLooksComplete(text) {
+  const body = String(text);
+  if (sseHasDone(body)) return true;
+  return /"finish_reason"\s*:\s*"(?:stop|length|tool_calls|content_filter|function_call)"/.test(body);
+}
+
+/**
+ * 构造一个 OpenAI 风格的 SSE 错误事件。
  *
- * Text, reasoning and tool calls are all incremental on the wire:
- * `delta.tool_calls[].function.name` / `.arguments` arrive in fragments and must be
- * concatenated per `index` before the JSON can be parsed by the caller.
+ * 流已经开始后再出问题,没法改 HTTP 状态码了,只能按 OpenAI 的惯例往流里写一个
+ * `{"error": …}` 载荷,让客户端据此报错,而不是把截断的输出当成正常结束。
+ */
+export function formatSseError(message, { type = 'upstream_error' } = {}) {
+  return `data: ${JSON.stringify({ error: { message, type } })}\n\n`;
+}
+
+/**
+ * 把 WorkBuddy 的 SSE 流聚合为一个标准的非流式 completion 响应。
  *
- * @param {string} sseText raw `text/event-stream` body
- * @param {string} [model] model id to echo back
+ * @param {string} sseText 原始 `text/event-stream` 响应体
+ * @param {string} [model]  回显的模型 id
  * @returns {object} OpenAI chat completion
  */
 export function aggregateSse(sseText, model) {

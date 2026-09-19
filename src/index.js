@@ -34,8 +34,8 @@ export {
   withExpiry,
 } from './session.js';
 export { fetchModels, parseCatalog, sessionCredential, readCache, writeCache, clearCache } from './catalog.js';
-export { startServer, createHandler } from './server.js';
-export { aggregateSse, iterSseData, accumulateToolCall } from './sse.js';
+export { startServer, createHandler, startHeartbeat, pipeUpstreamStream } from './server.js';
+export { aggregateSse, iterSseData, accumulateToolCall, sseHasDone, sseLooksComplete, formatSseError } from './sse.js';
 export { openInBrowser, browserCommand } from './browser.js';
 export { run, parseArgs, formatModels, formatHermesSnippet } from './cli.js';
 export { WorkBuddyError, pluginRequest, pollPlugin } from './api.js';

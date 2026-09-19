@@ -51,7 +51,13 @@ export const STATE_DIR = process.env.WORKBUDDY_PROXY_HOME?.trim()
 export const SESSION_FILE = path.join(STATE_DIR, 'session.json');
 export const MODELS_CACHE_FILE = path.join(STATE_DIR, 'models.json');
 
-/** Model catalog cache lifetime (ms). */
+/**
+ * SSE 心跳间隔(毫秒)。上游长时间不吐 token 时,用于保活。
+ * 设为 0 可关闭。
+ */
+export const HEARTBEAT_INTERVAL_MS = 15_000;
+
+/** 模型目录缓存时长(ms)。 */
 export const MODELS_TTL_MS = 10 * 60 * 1000;
 
 /** Refresh the access token this many ms before it expires. */

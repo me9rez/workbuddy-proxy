@@ -11,6 +11,7 @@ Hermes、dsh、OpenAI SDK、IDE 插件、shell 脚本都能直接用。
 - 👥 **多账号** —— 可以登录多个账号,按请求指定用哪个
 - 📋 **实时模型目录** —— 按凭据返回真实模型列表,含上下文窗口和模态
 - 🔁 **流式 + 非流式** —— 上游只支持流式,代理会在本地把它折回完整响应
+- 💓 **心跳保活 + 断流检测** —— 空闲时发送 SSE 注释行防止连接超时;上游中途断线时往流里补一个错误事件,客户端不会把截断的输出误当正常结束
 - 🧩 **零依赖** —— Node ≥ 22,只用标准库
 - 🛡️ **默认只监听本机** —— 需要对外时可加本地令牌加固
 
@@ -71,8 +72,24 @@ curl http://127.0.0.1:8788/v1/chat/completions \
 | `workbuddy-proxy whoami [--account <key>]` | 查看某个账号(**不会打印令牌**) |
 | `workbuddy-proxy models [--refresh] [--account <key>]` | 列出模型(含上下文窗口 / 最大输出 / 图片 / 思考) |
 | `workbuddy-proxy models --hermes` | 生成 Hermes `config.yaml` 的 `providers:` 片段 |
-| `workbuddy-proxy serve [--port 8788] [--host 127.0.0.1] [--token sk-local] [--account <key>] [--fallback]` | 启动代理 |
+| `workbuddy-proxy serve [--port 8788] [--host 127.0.0.1] [--token sk-local] [--account <key>] [--fallback] [--heartbeat <秒>]` | 启动代理 |
 | `workbuddy-proxy logout [--account <key>] [--all]` | 删除一个账号,或全部 |
+
+### 流式行为
+
+因为上游只支持流式,代理在转发时额外做两件事:
+
+- **心跳**:默认每 **15 秒**往流里写一行 SSE 注释(`: keep-alive`)。注释行按规范会被客户端忽略,
+  所以既能防止客户端/中间层在长时间无数据时超时断开,又不会污染数据。
+  用 `--heartbeat <秒>` 调整,`--heartbeat 0` 关闭。
+- **断流检测**:如果上游中途断线,或者流结束时**没有**出现结束标记(`[DONE]` / `finish_reason`),
+  代理会补发一个 OpenAI 风格的错误事件:
+
+  ```text
+  data: {"error":{"message":"上游流中断:socket hang up","type":"upstream_error"}}
+  ```
+
+  非流式请求同样会检查:读到的 SSE 不完整时**直接报错**,不会返回一个残缺的 completion。
 
 ### 环境变量
 

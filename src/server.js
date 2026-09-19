@@ -13,12 +13,18 @@
  *
  * 上游只支持流式,所以代理一律以 `stream: true` 请求,并在客户端要非流式时
  * 把 SSE 折回一个完整响应。
+ *
+ * 流式路径上还有两件保命的事:
+ *   - **心跳**:空闲时定期写 SSE 注释行,避免客户端/中间层因长时间无数据而超时断开;
+ *   - **断流检测**:上游若中途断线或没给出结束标记,往流里补一个 `{"error": …}` 事件,
+ *     而不是让客户端把截断的输出当成正常结束。
  */
 
 import http from 'node:http';
-import { CHAT_URL, DEFAULT_HOST, DEFAULT_PORT } from './constants.js';
+import { once } from 'node:events';
+import { CHAT_URL, DEFAULT_HOST, DEFAULT_PORT, HEARTBEAT_INTERVAL_MS } from './constants.js';
 import { credentialHeaders, WorkBuddyError } from './api.js';
-import { aggregateSse } from './sse.js';
+import { SSE_HEARTBEAT, aggregateSse, formatSseError, sseLooksComplete } from './sse.js';
 import { ensureFreshSession, listAccounts, loadStore, sessionSummary } from './session.js';
 import { fetchModels, sessionCredential } from './catalog.js';
 
@@ -81,10 +87,86 @@ export function requestedAccount(req, url) {
 }
 
 /**
+ * 开始给响应写 SSE 心跳注释行。
+ *
+ * 注释行(`:` 开头)按 SSE 规范会被客户端忽略,所以既能保活又不会污染数据流。
+ *
+ * @param {import('node:http').ServerResponse} res
+ * @param {number} intervalMs 间隔;<=0 表示关闭
+ * @returns {() => void} 停止函数
+ */
+export function startHeartbeat(res, intervalMs) {
+  if (!Number.isFinite(intervalMs) || intervalMs <= 0) return () => {};
+  const timer = setInterval(() => {
+    if (res.writableEnded || res.destroyed) return;
+    try {
+      res.write(SSE_HEARTBEAT);
+    } catch {
+      /* 连接已断开,下一次检查会停掉定时器 */
+    }
+  }, intervalMs);
+  timer.unref?.();
+  return () => clearInterval(timer);
+}
+
+/**
+ * 把上游的 SSE 流透传给客户端,并处理背压、心跳与中途断线。
+ *
+ * @returns {Promise<void>}
+ */
+export async function pipeUpstreamStream(upstream, res, { heartbeatMs, logger = console } = {}) {
+  res.writeHead(200, {
+    'content-type': 'text/event-stream; charset=utf-8',
+    'cache-control': 'no-cache',
+    connection: 'keep-alive',
+    'x-accel-buffering': 'no',
+  });
+
+  const stopHeartbeat = startHeartbeat(res, heartbeatMs);
+  const decoder = new TextDecoder('utf-8');
+  let tail = '';
+  let failure = null;
+
+  try {
+    if (!upstream.body) {
+      failure = '上游没有返回响应体';
+    } else {
+      for await (const chunk of upstream.body) {
+        const text = typeof chunk === 'string' ? chunk : decoder.decode(chunk, { stream: true });
+        // 只保留尾部:跨 chunk 的结束标记检测不需要全文,避免无界增长。
+        tail = (tail + text).slice(-4096);
+        if (!res.write(chunk)) await once(res, 'drain');
+        if (res.destroyed) break;
+      }
+    }
+  } catch (error) {
+    failure = `上游流中断:${error?.message ?? error}`;
+  } finally {
+    stopHeartbeat();
+  }
+
+  if (res.destroyed || res.writableEnded) return;
+  if (failure) {
+    logger.error?.(`[proxy] ${failure}`);
+    res.write(formatSseError(failure));
+  } else if (!sseLooksComplete(tail)) {
+    const message = '上游流提前结束(未收到结束标记 [DONE])';
+    logger.error?.(`[proxy] ${message}`);
+    res.write(formatSseError(message));
+  }
+  res.end();
+}
+
+/**
  * Build the request handler. Exported separately from `startServer` so tests can drive it
  * without binding a port.
  */
-export function createHandler({ localToken = '', logger = console, allowFallthrough = false } = {}) {
+export function createHandler({
+  localToken = '',
+  logger = console,
+  allowFallthrough = false,
+  heartbeatMs = HEARTBEAT_INTERVAL_MS,
+} = {}) {
   return async function handle(req, res) {
     const url = new URL(req.url, `http://${req.headers.host ?? 'localhost'}`);
     try {
@@ -133,7 +215,7 @@ export function createHandler({ localToken = '', logger = console, allowFallthro
       }
 
       if (url.pathname === '/v1/chat/completions' && req.method === 'POST') {
-        return await handleChat(req, res, url, { logger, allowFallthrough });
+        return await handleChat(req, res, url, { logger, allowFallthrough, heartbeatMs });
       }
 
       return sendJson(res, 404, { error: { message: `未知路由:${req.method} ${url.pathname}` } });
@@ -155,7 +237,7 @@ function resolveSession(req, url, { allowFallthrough }) {
   });
 }
 
-async function handleChat(req, res, url, { logger, allowFallthrough }) {
+async function handleChat(req, res, url, { logger, allowFallthrough, heartbeatMs }) {
   const session = await resolveSession(req, url, { allowFallthrough });
   const raw = await readBody(req);
 
@@ -196,20 +278,21 @@ async function handleChat(req, res, url, { logger, allowFallthrough }) {
   }
 
   if (wantsStream) {
-    res.writeHead(200, {
-      'content-type': 'text/event-stream; charset=utf-8',
-      'cache-control': 'no-cache',
-      connection: 'keep-alive',
-      'x-workbuddy-account': session.id,
-    });
-    if (!upstream.body) return res.end();
-    for await (const chunk of upstream.body) {
-      if (!res.write(chunk)) await new Promise((resolve) => res.once('drain', resolve));
-    }
-    return res.end();
+    return pipeUpstreamStream(upstream, res, { heartbeatMs, logger });
   }
 
-  return sendJson(res, 200, aggregateSse(await upstream.text(), payload.model));
+  // 非流式:读完整段 SSE 后本地聚合。中途断线时 upstream.text() 会抛错,
+  // 没有结束标记则视为截断 —— 两种都直接报错,不返回残缺的 completion。
+  let sseText;
+  try {
+    sseText = await upstream.text();
+  } catch (cause) {
+    throw new WorkBuddyError(`读取上游响应失败（${cause?.message ?? cause}）`, { cause });
+  }
+  if (!sseLooksComplete(sseText)) {
+    throw new WorkBuddyError('上游流提前结束(未收到结束标记 [DONE])');
+  }
+  return sendJson(res, 200, aggregateSse(sseText, payload.model));
 }
 
 /** Start listening. @returns {import('node:http').Server} */
@@ -219,15 +302,17 @@ export function startServer({
   localToken = '',
   logger = console,
   allowFallthrough = false,
+  heartbeatMs = HEARTBEAT_INTERVAL_MS,
 } = {}) {
-  const server = http.createServer(createHandler({ localToken, logger, allowFallthrough }));
+  const server = http.createServer(createHandler({ localToken, logger, allowFallthrough, heartbeatMs }));
   server.listen(port, host, () => {
     const shown = host === '0.0.0.0' ? '127.0.0.1' : host;
-    logger.log?.(`workbuddy-proxy listening on http://${shown}:${port}`);
-    logger.log?.(`  OpenAI base URL: http://${shown}:${port}/v1`);
-    logger.log?.(`  models:          http://${shown}:${port}/v1/models`);
-    logger.log?.(`  accounts:        http://${shown}:${port}/v1/accounts`);
-    if (localToken) logger.log?.('  local bearer token: required');
+    logger.log?.(`workbuddy-proxy 已启动:http://${shown}:${port}`);
+    logger.log?.(`  OpenAI 兼容地址:http://${shown}:${port}/v1`);
+    logger.log?.(`  模型列表:      http://${shown}:${port}/v1/models`);
+    logger.log?.(`  账号列表:      http://${shown}:${port}/v1/accounts`);
+    logger.log?.(`  SSE 心跳:      ${heartbeatMs > 0 ? `${heartbeatMs} ms` : '已关闭'}`);
+    if (localToken) logger.log?.('  本地令牌:      必须携带 Authorization: Bearer');
   });
   return server;
 }

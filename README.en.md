@@ -11,6 +11,9 @@ Sign in once through the browser, then point any OpenAI-compatible client at
 - 👥 **Multiple accounts** — sign in as many times as you like; pick one per request
 - 📋 **Live model catalog** — the credential's real model list with context windows
 - 🔁 **Streaming *and* non-streaming** — upstream only streams, the proxy folds it back
+- 💓 **Keep-alive + truncation detection** — idle streams get SSE comment heartbeats, and a
+  dropped upstream connection injects an error event instead of letting the client treat a
+  truncated answer as complete
 - 🧩 **Zero dependencies** — Node ≥ 22, standard library only
 - 🛡️ **Loopback by default** — optional local bearer token for extra safety
 
@@ -72,8 +75,25 @@ curl http://127.0.0.1:8788/v1/chat/completions \
 | `workbuddy-proxy whoami [--account <key>]` | Print an account summary (never the tokens) |
 | `workbuddy-proxy models [--refresh] [--account <key>]` | List models with context window / max output / vision / reasoning |
 | `workbuddy-proxy models --hermes` | Print a `providers:` snippet for Hermes `config.yaml` |
-| `workbuddy-proxy serve [--port 8788] [--host 127.0.0.1] [--token sk-local] [--account <key>] [--fallback]` | Run the proxy |
+| `workbuddy-proxy serve [--port 8788] [--host 127.0.0.1] [--token sk-local] [--account <key>] [--fallback] [--heartbeat <seconds>]` | Run the proxy |
 | `workbuddy-proxy logout [--account <key>] [--all]` | Remove one account, or all of them |
+
+### Streaming behaviour
+
+Because upstream only speaks streaming, the proxy adds two safety nets while forwarding:
+
+- **Heartbeat** — every **15 s** by default it writes an SSE comment (`: keep-alive`).
+  Comments are ignored by clients per the SSE spec, so the connection stays alive without
+  polluting the data. Change it with `--heartbeat <seconds>`, disable with `--heartbeat 0`.
+- **Truncation detection** — if the upstream connection drops, or the stream ends without a
+  terminator (`[DONE]` / a `finish_reason`), the proxy emits an OpenAI-shaped error event:
+
+  ```text
+  data: {"error":{"message":"upstream stream interrupted: socket hang up","type":"upstream_error"}}
+  ```
+
+  Non-streaming requests are checked too: an incomplete SSE body fails the request instead
+  of returning a truncated completion.
 
 ## Multiple accounts
 
