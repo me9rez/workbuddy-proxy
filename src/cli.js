@@ -6,10 +6,11 @@
  *   workbuddy-proxy use <id|名称|序号>             切换当前账号
  *   workbuddy-proxy whoami [--account <key>]       查看某个账号的摘要
  *   workbuddy-proxy models [--refresh] [--account <key>] [--hermes]
- *   workbuddy-proxy serve [--port] [--host] [--token] [--account <key>] [--fallback]
+ *   workbuddy-proxy serve [--port] [--host] [--token] [--token-file] [--account <key>] [--fallback]
  *   workbuddy-proxy logout [--account <key>] [--all]
  */
 
+import { readFileSync } from 'node:fs';
 import { DEFAULT_HOST, DEFAULT_PORT } from './constants.js';
 import { login, accountLabel } from './auth.js';
 import {
@@ -27,6 +28,30 @@ import { fetchModels, clearCache, sessionCredential } from './catalog.js';
 import { startServer } from './server.js';
 import { HEARTBEAT_INTERVAL_MS } from './constants.js';
 
+/**
+ * 解析本地 API Key(客户端访问本代理时要带的凭据)。优先级:
+ *
+ *   1. `--token <key>`               显式给定
+ *   2. `--token-file <路径>`         从文件读取(计划任务/容器更安全:key 不会出现在进程命令行)
+ *   3. `WORKBUDDY_PROXY_API_KEY`     环境变量
+ *
+ * 结果为空字符串表示**不鉴权** —— 只建议在仅绑定回环地址时这样用。
+ */
+export function resolveLocalToken(flags = {}, env = process.env) {
+  if (flags.token !== undefined) return String(flags.token).trim();
+
+  if (flags['token-file'] !== undefined) {
+    const file = String(flags['token-file']);
+    try {
+      return readFileSync(file, 'utf8').trim();
+    } catch (error) {
+      throw new Error(`读取 --token-file 失败:${file}(${error?.message ?? error})`);
+    }
+  }
+
+  return String(env.WORKBUDDY_PROXY_API_KEY ?? '').trim();
+}
+
 const HELP = `workbuddy-proxy —— 把腾讯 WorkBuddy(CodeBuddy)模型代理成 OpenAI 兼容接口
 
 用法:
@@ -37,7 +62,7 @@ const HELP = `workbuddy-proxy —— 把腾讯 WorkBuddy(CodeBuddy)模型代理�
   workbuddy-proxy models [--refresh] [--account <key>]
   workbuddy-proxy models --hermes             生成 Hermes config.yaml 的 providers 片段
   workbuddy-proxy serve [--port 8788] [--host 127.0.0.1] [--token sk-local]
-                        [--account <key>] [--fallback]
+                        [--token-file <路径>] [--account <key>] [--fallback]
                         [--heartbeat <秒>] [--detect-truncation]
   workbuddy-proxy logout [--account <key>] [--all]
   workbuddy-proxy help
@@ -226,10 +251,17 @@ export async function run(argv, io = console) {
         }
         heartbeatMs = Math.round(seconds * 1000);
       }
+      let localToken;
+      try {
+        localToken = resolveLocalToken(flags);
+      } catch (error) {
+        io.error(error.message);
+        return 1;
+      }
       startServer({
         port,
         host: String(flags.host ?? DEFAULT_HOST),
-        localToken: String(flags.token ?? ''),
+        localToken,
         allowFallthrough: flags.fallback === true,
         heartbeatMs,
         detectTruncation: flags['detect-truncation'] === true,

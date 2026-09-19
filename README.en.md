@@ -75,7 +75,7 @@ curl http://127.0.0.1:8788/v1/chat/completions \
 | `workbuddy-proxy whoami [--account <key>]` | Print an account summary (never the tokens) |
 | `workbuddy-proxy models [--refresh] [--account <key>]` | List models with context window / max output / vision / reasoning |
 | `workbuddy-proxy models --hermes` | Print a `providers:` snippet for Hermes `config.yaml` |
-| `workbuddy-proxy serve [--port 8788] [--host 127.0.0.1] [--token sk-local] [--account <key>] [--fallback] [--heartbeat <seconds>]` | Run the proxy |
+| `workbuddy-proxy serve [--port 8788] [--host 127.0.0.1] [--token sk-local] [--token-file <path>] [--account <key>] [--fallback] [--heartbeat <seconds>] [--detect-truncation]` | Run the proxy |
 | `workbuddy-proxy logout [--account <key>] [--all]` | Remove one account, or all of them |
 
 ### Streaming behaviour (two opt-in switches, **both off by default**)
@@ -165,7 +165,48 @@ order — useful when one account's quota runs dry.
 Account selection: `X-WorkBuddy-Account: <id|label|index>` header, or `?account=<key>`;
 without either, the store's active account is used.
 
-When `--token` is set, every request must carry `Authorization: Bearer <token>`.
+### Local API key (auth)
+
+Put a lock on the proxy. **Off by default** — it only activates when you pass a flag,
+same principle as the heartbeat and truncation detection.
+
+| Source | Usage | Good for |
+|---|---|---|
+| `--token <key>` | `serve --token sk-local` | manual debugging |
+| `--token-file <path>` | `serve --token-file ~/.workbuddy-proxy/api-key.txt` | **scheduled tasks / containers** — the key never shows up in the process command line |
+| `WORKBUDDY_PROXY_API_KEY` | environment variable | CI, container orchestration |
+
+Precedence: `--token` > `--token-file` > environment variable.
+
+Once enabled:
+
+- every `/v1/*` request must carry `Authorization: Bearer <key>`, otherwise `401` with
+  `WWW-Authenticate: Bearer realm="workbuddy-proxy"`
+- keys are compared in **constant time** (`crypto.timingSafeEqual`), so response latency
+  can't be used to guess them character by character
+- **`GET /healthz` and `GET /ping` stay open** and return just `{"ok":true}` — handy for
+  monitoring and tunnel liveness checks, and they **leak no account information**
+  (`/health` does, so that one still requires the key)
+
+Clients send it like any other API key:
+
+```python
+client = OpenAI(base_url="http://127.0.0.1:8788/v1", api_key="sk-local")
+```
+
+```bash
+curl -H "Authorization: Bearer sk-local" http://127.0.0.1:8788/v1/models
+```
+
+The installer can generate one for you:
+
+```powershell
+pwsh -File scripts/install-service.ps1 -GenerateApiKey -StartNow
+# 🔑 已生成 API Key: sk-wb-xxxxxxxx…
+#    保存在 ~/.workbuddy-proxy/api-key.txt (current user only, tightened with icacls)
+```
+
+Read it back with `Get-Content "$HOME\.workbuddy-proxy\api-key.txt"` and hand it to your client.
 
 ## Use with Hermes
 

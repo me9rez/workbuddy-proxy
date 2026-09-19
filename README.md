@@ -13,7 +13,7 @@ Hermes、dsh、OpenAI SDK、IDE 插件、shell 脚本都能直接用。
 - 🔁 **流式 + 非流式** —— 上游只支持流式,代理会在本地把它折回完整响应
 - 💓 **可选的心跳与断流检测** —— 心跳防止长连接被超时断开;断流检测在流被截断时补发错误事件。**两者默认关闭**,用 `--heartbeat <秒>` / `--detect-truncation` 显式开启
 - 🧩 **零依赖** —— Node ≥ 22,只用标准库
-- 🛡️ **默认只监听本机** —— 需要对外时可加本地令牌加固
+- 🛡️ **默认只监听本机** —— 需要对外时可加本地 API Key 加固(`--token` / `--token-file` / 环境变量)
 
 > **非官方项目。** 这是第三方适配器,与腾讯 / WorkBuddy / CodeBuddy 无隶属、背书或支持关系。
 > 上游接口不是公开、稳定承诺的开发者 API,路径和 Header 可能随 CodeBuddy 版本变化。
@@ -72,7 +72,7 @@ curl http://127.0.0.1:8788/v1/chat/completions \
 | `workbuddy-proxy whoami [--account <key>]` | 查看某个账号(**不会打印令牌**) |
 | `workbuddy-proxy models [--refresh] [--account <key>]` | 列出模型(含上下文窗口 / 最大输出 / 图片 / 思考) |
 | `workbuddy-proxy models --hermes` | 生成 Hermes `config.yaml` 的 `providers:` 片段 |
-| `workbuddy-proxy serve [--port 8788] [--host 127.0.0.1] [--token sk-local] [--account <key>] [--fallback] [--heartbeat <秒>]` | 启动代理 |
+| `workbuddy-proxy serve [--port 8788] [--host 127.0.0.1] [--token sk-local] [--token-file <路径>] [--account <key>] [--fallback] [--heartbeat <秒>] [--detect-truncation]` | 启动代理 |
 | `workbuddy-proxy logout [--account <key>] [--all]` | 删除一个账号,或全部 |
 
 ### 流式行为(两个可选开关,**默认都关闭**)
@@ -154,7 +154,45 @@ curl 'http://127.0.0.1:8788/v1/models?account=2'
 
 账号选择:`X-WorkBuddy-Account: <id|名称|序号>` header,或 `?account=<key>`;都不给则用当前账号。
 
-设置 `--token` 后,所有请求都必须带 `Authorization: Bearer <token>`。
+### 本地 API Key(鉴权)
+
+给代理加一道门。**默认不鉴权**,显式传参才启用(与心跳/断流检测同一原则)。
+
+| 来源 | 用法 | 适用场景 |
+|---|---|---|
+| `--token <key>` | `serve --token sk-local` | 手工调试 |
+| `--token-file <路径>` | `serve --token-file ~/.workbuddy-proxy/api-key.txt` | **计划任务/容器**(Key 不会出现在进程命令行里) |
+| `WORKBUDDY_PROXY_API_KEY` | 环境变量 | CI、容器编排 |
+
+优先级:`--token` > `--token-file` > 环境变量。
+
+启用后:
+
+- 所有 `/v1/*` 请求必须带 `Authorization: Bearer <key>`,否则返回 `401` 且带
+  `WWW-Authenticate: Bearer realm="workbuddy-proxy"`
+- Key 用**常量时间比较**(`crypto.timingSafeEqual`),不会因响应耗时被逐字符猜出来
+- **`GET /healthz` 和 `GET /ping` 免鉴权**,只回 `{"ok":true}` —— 方便监控和隧道探活,
+  且**不泄露账号信息**(`/health` 会显示账号,所以它仍需要鉴权)
+
+客户端带上它:
+
+```python
+client = OpenAI(base_url="http://127.0.0.1:8788/v1", api_key="sk-local")   # 原样放进 api_key
+```
+
+```bash
+curl -H "Authorization: Bearer sk-local" http://127.0.0.1:8788/v1/models
+```
+
+用安装脚本时可以直接生成一个:
+
+```powershell
+pwsh -File scripts/install-service.ps1 -GenerateApiKey -StartNow
+# 🔑 已生成 API Key: sk-wb-xxxxxxxx…
+#    保存在 ~/.workbuddy-proxy/api-key.txt(仅当前用户可读,用 icacls 收窄了权限)
+```
+
+之后用 `Get-Content "$HOME\.workbuddy-proxy\api-key.txt"` 取出来填给客户端即可。
 
 ## 接入 Hermes
 

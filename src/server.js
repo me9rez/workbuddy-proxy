@@ -22,6 +22,7 @@
 
 import http from 'node:http';
 import { once } from 'node:events';
+import { timingSafeEqual } from 'node:crypto';
 import { CHAT_URL, DEFAULT_HOST, DEFAULT_PORT, HEARTBEAT_INTERVAL_MS } from './constants.js';
 import { credentialHeaders, WorkBuddyError } from './api.js';
 import { SSE_HEARTBEAT, aggregateSse, formatSseError, sseLooksComplete } from './sse.js';
@@ -61,6 +62,17 @@ export function sendJson(res, status, payload) {
 export function bearerToken(headerValue) {
   const match = /^Bearer\s+(.+)$/i.exec(String(headerValue ?? '').trim());
   return match ? match[1].trim() : '';
+}
+
+/**
+ * 常量时间比较两个 API Key,避免通过响应耗时逐字符猜测。
+ * 长度不同直接返回 false(长度本身不是秘密)。
+ */
+export function tokensMatch(provided, expected) {
+  const a = Buffer.from(String(provided ?? ''), 'utf8');
+  const b = Buffer.from(String(expected ?? ''), 'utf8');
+  if (a.length !== b.length || a.length === 0) return false;
+  return timingSafeEqual(a, b);
 }
 
 /**
@@ -182,7 +194,13 @@ export function createHandler({
   return async function handle(req, res) {
     const url = new URL(req.url, `http://${req.headers.host ?? 'localhost'}`);
     try {
-      if (localToken && bearerToken(req.headers.authorization) !== localToken) {
+      // 免鉴权的最小存活探测:只回 ok,不泄露账号信息,方便监控与隧道健康检查。
+      if (url.pathname === '/healthz' || url.pathname === '/ping') {
+        return sendJson(res, 200, { ok: true });
+      }
+
+      if (localToken && !tokensMatch(bearerToken(req.headers.authorization), localToken)) {
+        res.setHeader('WWW-Authenticate', 'Bearer realm="workbuddy-proxy"');
         return sendJson(res, 401, { error: { message: '本地令牌无效', type: 'invalid_request_error' } });
       }
 
@@ -329,7 +347,7 @@ export function startServer({
     logger.log?.(`  账号列表:      http://${shown}:${port}/v1/accounts`);
     logger.log?.(`  SSE 心跳:      ${heartbeatMs > 0 ? `${heartbeatMs} ms` : '已关闭(默认)'}`);
     logger.log?.(`  断流检测:      ${detectTruncation ? '开启' : '已关闭(默认)'}`);
-    if (localToken) logger.log?.('  本地令牌:      必须携带 Authorization: Bearer');
+    if (localToken) logger.log?.('  本地令牌:      已启用,请求须带 Authorization: Bearer <key>');
   });
   return server;
 }
