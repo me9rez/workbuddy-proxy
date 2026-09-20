@@ -17,6 +17,10 @@ Hermes、dsh、OpenAI SDK、IDE 插件、shell 脚本都能直接用。
 
 > **非官方项目。** 这是第三方适配器,与腾讯 / WorkBuddy / CodeBuddy 无隶属、背书或支持关系。
 > 上游接口不是公开、稳定承诺的开发者 API,路径和 Header 可能随 CodeBuddy 版本变化。
+>
+> **账号风险。** 代理是用**你的账号凭据**、以官方 CLI 的身份向 `copilot.tencent.com` 发请求
+> (请求头里的 User-Agent 就是 CodeBuddy CLI 的标识)。这属于非官方用法,可能违反服务条款,
+> 也可能触发风控或导致账号被限流/停用。请自行评估,不建议用主力账号。
 
 ## 环境要求
 
@@ -53,6 +57,9 @@ workbuddy-proxy models
 workbuddy-proxy serve
 # → http://127.0.0.1:8788/v1
 ```
+
+三步都要看到成功标志才算通:第 1 步打印 `✅ 已登录:<账号>`,第 2 步列出非空模型表,
+第 3 步出现 `已启动:http://127.0.0.1:8788`。没登录就启动的话,`/v1/models` 会返回 `500` + `尚未登录`。
 
 然后随便用:
 
@@ -123,7 +130,7 @@ workbuddy-proxy logout --all          # 全部删除
 ```
 
 每个账号用**刷新令牌的摘要**作为标识(不是令牌本身),所以用同一个账号再次登录会在原地刷新,
-而不会产生重复条目。凭据存放于 `~/.workbuddy-proxy/session.json`(权限 `0600`);
+而不会产生重复条目。凭据存放于 `~/.workbuddy-proxy/session.json`(权限 `0600`,仅 Unix 生效;Windows 见「安全与隐私」);
 旧版单账号格式在第一次读取时**自动迁移**。
 
 **按请求选择账号** —— `serve` 默认用当前账号,任何请求都可以覆盖:
@@ -144,13 +151,16 @@ curl 'http://127.0.0.1:8788/v1/models?account=2'
 
 ## HTTP 接口
 
-| 路由 | 说明 |
-|---|---|
-| `GET /health` | `{ ok, activeId, account, accounts }` |
-| `GET /v1/accounts` | 已保存账号(id、名称、是否当前、过期时间 —— 不含令牌) |
-| `GET /v1/models` | OpenAI 模型列表,附 `context_length`、`max_output_tokens`、`capabilities` |
-| `GET /v1/models?refresh=1` | 绕过 10 分钟目录缓存 |
-| `POST /v1/chat/completions` | 对话补全(`"stream": true` 直接透传 SSE,否则本地聚合) |
+| 路由 | 说明 | 需鉴权\* |
+|---|---|---|
+| `GET /healthz` / `GET /ping` | 存活探测,只回 `{ "ok": true }`,**不含账号信息** | 否 |
+| `GET /health` | `{ ok, activeId, account, accounts }`(含账号信息) | 是 |
+| `GET /v1/accounts` | 已保存账号(id、名称、是否当前、过期时间 —— 不含令牌) | 是 |
+| `GET /v1/models` | OpenAI 模型列表,附 `context_length`、`max_output_tokens`、`capabilities` | 是 |
+| `GET /v1/models?refresh=1` | 绕过 10 分钟目录缓存 | 是 |
+| `POST /v1/chat/completions` | 对话补全(`"stream": true` 直接透传 SSE,否则本地聚合) | 是 |
+
+\* 这一列只在启用本地 API Key(`--token` / `--token-file` / 环境变量)后才有区别;未启用时所有路由都放行。
 
 账号选择:`X-WorkBuddy-Account: <id|名称|序号>` header,或 `?account=<key>`;都不给则用当前账号。
 
@@ -205,18 +215,25 @@ providers:
   workbuddy-proxy:
     name: WorkBuddy (proxy)
     base_url: http://127.0.0.1:8788/v1
-    model: deepseek-v4.1-flash
+    model: hy4-preview
     discover_models: false
     models:
+      hy4-preview:
+        context_length: 1000000
+        supports_vision: true
       hy3:
         context_length: 192000
         supports_vision: true
-      # …
+      # …其余模型同上(实际输出共 16 个,以你账号的实时目录为准)
 ```
 
 ```bash
 hermes --provider workbuddy-proxy -m glm-5.3 -z "你好"
 ```
+
+> 上面这段是 `models --hermes` 的真实输出(截断版)。写进配置推荐把它转成 JSON 一次调用:
+> `hermes config set providers.workbuddy-proxy '<json>' --force` —— 一次写整段,不会动到其它 provider。
+> 回环地址不需要 `api_key`,Hermes 会自动用占位符 `no-key-required`。
 
 > Hermes 的模型选择器只读 `models.dev` 映射表、内置 overlay 和 `config.yaml` 的 `providers:` 段,
 > 所以自定义 provider **必须**写进配置才能在选择器里看到。
@@ -254,8 +271,8 @@ pwsh -File scripts/install-service.ps1 -HeartbeatSeconds 15 -DetectTruncation -S
 # 对外暴露时请加本地令牌
 pwsh -File scripts/install-service.ps1 -BindHost 0.0.0.0 -LocalToken sk-local -StartNow
 
-# PATH 里没有 node(mise/nvm 等)时显式指定
-pwsh -File scripts/install-service.ps1 -NodePath "$env:LOCALAPPDATA\mise\installs\node\24.21.0\node.exe" -StartNow
+# PATH 里没有 node(mise/nvm 等)时显式指定;用 shims 目录,升级 node 后不用改
+pwsh -File scripts/install-service.ps1 -NodePath "$env:LOCALAPPDATA\mise\shims\node.exe" -StartNow
 ```
 
 脚本做的事:
@@ -358,7 +375,8 @@ macOS 也可以直接用 launchd,或把上面换成 `brew services` 管理的包
 ## 安全与隐私
 
 - 凭据存放于 `~/.workbuddy-proxy/session.json`,权限 `0600`,**绝不写入日志**;`whoami` 只输出
-  摘要(账号名、id、过期时间),不含令牌。
+  摘要(账号名、id、过期时间),不含令牌。`mode 0600` 只在 Unix 生效 —— Windows 上该文件继承
+  用户目录的 ACL(SYSTEM / Administrators / 当前用户),要更严可自行 `icacls` 收窄。
 - 服务**默认只绑定回环地址**。如果要对局域网开放,请传 `--token`,代理会强制校验
   `Authorization: Bearer <token>`。
 - 这个代理代表**你的账号**说话:任何能访问它的人都能消耗你的额度。
@@ -379,7 +397,7 @@ macOS 也可以直接用 launchd,或把上面换成 `brew services` 管理的包
 ## 开发
 
 ```bash
-node --test          # 42 个单元测试
+node --test          # 全部单元测试(登录 / 存储 / SSE 聚合 / 断流检测)
 npm run check        # 语法检查 + 测试
 ```
 

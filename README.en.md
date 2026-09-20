@@ -20,6 +20,11 @@ Sign in once through the browser, then point any OpenAI-compatible client at
 > **Unofficial.** This is a third-party adapter. It is not affiliated with, endorsed by, or
 > supported by Tencent, WorkBuddy, or CodeBuddy. The upstream API is not a public, stable
 > developer API — paths and headers may change with CodeBuddy releases.
+>
+> **Account risk.** The proxy makes requests to `copilot.tencent.com` with **your credentials**,
+> posing as the official CLI (the User-Agent header is CodeBuddy CLI's identifier). That is not a
+> supported usage; it may violate the terms of service and can get the account rate-limited or
+> suspended. Judge the risk yourself — don't point it at your main account.
 
 ## Requirements
 
@@ -56,6 +61,10 @@ node bin/workbuddy-proxy.js models
 node bin/workbuddy-proxy.js serve
 # → http://127.0.0.1:8788/v1
 ```
+
+All three steps must show a success marker: step 1 prints `✅ 已登录:<account>`, step 2 lists a
+non-empty model table, step 3 prints `已启动:http://127.0.0.1:8788`. Started without logging in,
+`/v1/models` answers `500` + `尚未登录`.
 
 Then, with any OpenAI-compatible client:
 
@@ -123,7 +132,8 @@ workbuddy-proxy logout --all          # drop everything
 
 Each account is identified by a **digest of its refresh token** (never the token itself),
 so signing in again with the same account refreshes it in place instead of duplicating it.
-Credentials live in `~/.workbuddy-proxy/session.json` with mode `0600`; a legacy
+Credentials live in `~/.workbuddy-proxy/session.json` with mode `0600` (Unix only — see
+Security & privacy for Windows); a legacy
 single-account file is migrated automatically on first read.
 
 **Choosing an account per request** — the `serve` process falls back to the active account,
@@ -154,13 +164,17 @@ order — useful when one account's quota runs dry.
 
 ## HTTP API
 
-| Route | Description |
-|---|---|
-| `GET /health` | `{ ok, activeId, account, accounts }` |
-| `GET /v1/accounts` | Stored accounts (id, label, active flag, expiry — never tokens) |
-| `GET /v1/models` | OpenAI model list, plus `context_length`, `max_output_tokens` and a `capabilities` object |
-| `GET /v1/models?refresh=1` | Bypass the 10-minute catalog cache |
-| `POST /v1/chat/completions` | Chat completion (SSE passthrough with `"stream": true`, otherwise aggregated locally) |
+| Route | Description | Needs auth\* |
+|---|---|---|
+| `GET /healthz` / `GET /ping` | Liveness probe, returns `{ "ok": true }` and **no account information** | No |
+| `GET /health` | `{ ok, activeId, account, accounts }` (includes account info) | Yes |
+| `GET /v1/accounts` | Stored accounts (id, label, active flag, expiry — never tokens) | Yes |
+| `GET /v1/models` | OpenAI model list, plus `context_length`, `max_output_tokens` and a `capabilities` object | Yes |
+| `GET /v1/models?refresh=1` | Bypass the 10-minute catalog cache | Yes |
+| `POST /v1/chat/completions` | Chat completion (SSE passthrough with `"stream": true`, otherwise aggregated locally) | Yes |
+
+\* The column only matters once the local API key is enabled (`--token` / `--token-file` / env var);
+with auth off every route is open.
 
 Account selection: `X-WorkBuddy-Account: <id|label|index>` header, or `?account=<key>`;
 without either, the store's active account is used.
@@ -219,18 +233,26 @@ providers:
   workbuddy-proxy:
     name: WorkBuddy (proxy)
     base_url: http://127.0.0.1:8788/v1
-    model: deepseek-v4.1-flash
+    model: hy4-preview
     discover_models: false
     models:
+      hy4-preview:
+        context_length: 1000000
+        supports_vision: true
       hy3:
         context_length: 192000
         supports_vision: true
-      # …
+      # …14 more (16 total — the catalog is per credential)
 ```
 
 ```bash
 hermes --provider workbuddy-proxy -m glm-5.3 -z "hello"
 ```
+
+> That snippet is the real `models --hermes` output (abridged). To install it, convert it to JSON and
+> write it in one call: `hermes config set providers.workbuddy-proxy '<json>' --force` — one shot,
+> other providers untouched. Loopback endpoints need no `api_key`; Hermes sends the placeholder
+> `no-key-required` automatically.
 
 ## Use with the OpenAI SDK
 
@@ -263,8 +285,9 @@ pwsh -File scripts/install-service.ps1 -HeartbeatSeconds 15 -DetectTruncation -S
 # exposing beyond loopback? add a local token
 pwsh -File scripts/install-service.ps1 -BindHost 0.0.0.0 -LocalToken sk-local -StartNow
 
-# node not on PATH (mise/nvm)? point at it explicitly
-pwsh -File scripts/install-service.ps1 -NodePath "$env:LOCALAPPDATA\mise\installs\node\24.21.0\node.exe" -StartNow
+# node not on PATH (mise/nvm)? point at it explicitly — use the shims dir,
+# it keeps working after a node upgrade
+pwsh -File scripts/install-service.ps1 -NodePath "$env:LOCALAPPDATA\mise\shims\node.exe" -StartNow
 ```
 
 What the script does:
@@ -369,7 +392,9 @@ Two upstream quirks shaped the design:
 ## Security & privacy
 
 - Credentials live in `~/.workbuddy-proxy/session.json` with mode `0600` and are **never**
-  written to logs; `whoami` prints a summary without tokens.
+  written to logs; `whoami` prints a summary without tokens. On Windows `mode 0600` is a no-op:
+  the file just inherits the user-profile ACL (SYSTEM / Administrators / you) — tighten it with
+  `icacls` yourself if you need more.
 - The server binds to **loopback** by default. If you bind beyond it, pass `--token` — the
   proxy will then require `Authorization: Bearer <token>`.
 - This proxy speaks for *your* account: anything that can reach it can spend your quota.
@@ -387,7 +412,7 @@ Two upstream quirks shaped the design:
 ## Development
 
 ```bash
-node --test          # 22 unit tests
+node --test          # run the full unit-test suite
 npm run check        # syntax + tests
 ```
 
